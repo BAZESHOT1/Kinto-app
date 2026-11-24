@@ -17,6 +17,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { ThemeProvider, DefaultTheme, DarkTheme } from '@react-navigation/native';
 import { StatusBar } from 'expo-status-bar';
 import { AppState, Platform, View, ActivityIndicator, StyleSheet, Text } from 'react-native';
+import Head from 'expo-router/head';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { KeyboardProvider } from 'react-native-keyboard-controller';
 import { useTheme } from '../src/theme/useTheme';
@@ -1218,6 +1219,9 @@ export default function RootLayout() {
 
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
+    <Head>
+      <title>Kinto</title>
+    </Head>
     <KeyboardProvider>
     <View style={{ flex: 1, backgroundColor: theme.background }} suppressHydrationWarning>
       <StatusBar style={theme.dark ? 'light' : 'dark'} />
