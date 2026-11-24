@@ -167,6 +167,8 @@ export function SimpleFirmwareWizard({
   }, [board]);
   const [ssid, setSsid] = React.useState('');
   const [password, setPassword] = React.useState('');
+  /** Показывать ли пароль Wi-Fi при вводе (по умолчанию скрыт). */
+  const [showWifiPass, setShowWifiPass] = React.useState(false);
   const [stepError, setStepError] = React.useState('');
 
   const [availableBoards, setAvailableBoards] = React.useState<FirmwareBoard[] | null>(null);
@@ -732,11 +734,22 @@ export function SimpleFirmwareWizard({
               value={password}
               onChangeText={setPassword}
               placeholder="пароль роутера"
-              secureTextEntry
+              secureTextEntry={!showWifiPass}
               autoCapitalize="none"
               maxLength={64}
               accessibilityLabel="Пароль Wi-Fi роутера"
             />
+            <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: -4, marginBottom: 8, paddingHorizontal: 2 }}>
+              <Text style={{ color: theme.textDisabled, fontSize: 11 }}>Пароль попадёт только в прошивку</Text>
+              <Text
+                onPress={() => setShowWifiPass((value) => !value)}
+                accessibilityRole="button"
+                accessibilityLabel={showWifiPass ? 'Скрыть пароль Wi-Fi' : 'Показать пароль Wi-Fi'}
+                style={{ color: theme.accent, fontSize: 11.5, fontWeight: '700' }}
+              >
+                {showWifiPass ? 'Скрыть' : 'Показать'}
+              </Text>
+            </View>
           </View>
         );
       case 7:
