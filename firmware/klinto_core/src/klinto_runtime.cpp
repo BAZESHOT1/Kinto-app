@@ -532,6 +532,19 @@ void KlintoNode::loop() {
     const bool linked = router_.gateway_route()->valid || cfg_.role == KL_ROLE_GATEWAY;
     digitalWrite(led_pin_, linked ? HIGH : (((millis() / 400) & 1) ? HIGH : LOW));
   }
+  /* Шлюз: сота должна сидеть на реальном канале AP. Роутер мог сменить канал
+   * или STA переподключился — иначе маяки уходят не туда, а носимые глухи. */
+  if (cfg_.role == KL_ROLE_GATEWAY && (uint32_t)(millis() - gw_channel_check_ms_) >= 5000u) {
+    gw_channel_check_ms_ = millis();
+    if (WiFi.status() == WL_CONNECTED) {
+      const int wifi_channel = WiFi.channel();
+      if (wifi_channel >= 1 && wifi_channel <= KL_CHANNEL_COUNT &&
+          (uint8_t)wifi_channel != cell_.channel()) {
+        Serial.printf("[klinto] gateway follows AP channel=%d\n", wifi_channel);
+        cell_.lock_gateway((uint8_t)wifi_channel, millis());
+      }
+    }
+  }
   vTaskDelay(pdMS_TO_TICKS(200));
 }
 

@@ -110,6 +110,7 @@ class KlintoNode {
   bool ota_pending_ = false;
   uint8_t ota_need_ifc_ = 0;
   uint32_t ota_relay_until_ = 0;
+  uint32_t gw_channel_check_ms_ = 0;
   int8_t led_pin_ = -1;
   void seedHw();
   void otaValidateTick(uint32_t now);

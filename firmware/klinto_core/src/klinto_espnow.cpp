@@ -32,13 +32,13 @@ bool EspNowInterface::init(const kl_config_t &cfg) {
   self_id_ = cfg.node_id;
   self_gateway_ = cfg.role == KL_ROLE_GATEWAY;
   s_instance = this;
-  /* Шлюз к этому моменту уже подключён к роутеру: disconnect() рвал связь
-   * (reason=8), STA начинал переподключаться и обходить каналы, а вместе с
-   * ним уходил с рабочего канала и ESP-NOW (маяки пропадали, носимые теряли
-   * соту). Если STA подключён — канал определяет AP, ничего не трогаем. */
+  /* Шлюз к этому моменту уже подключён к роутеру: WiFi.mode()/disconnect() рвут
+   * связь (reason=8/15), STA начинает переподключаться и обходить каналы, уводя
+   * за собой ESP-NOW — маяки пропадают, носимые теряют соту. Если STA подключён,
+   * канал определяет AP: НИЧЕГО не трогаем. */
   const bool sta_up = WiFi.status() == WL_CONNECTED;
-  WiFi.mode(WIFI_STA);
   if (!sta_up) {
+    WiFi.mode(WIFI_STA);
     WiFi.disconnect(false, false);
     delay(50);
     esp_wifi_set_channel(cfg.wifi_channel, WIFI_SECOND_CHAN_NONE);
@@ -48,6 +48,8 @@ bool EspNowInterface::init(const kl_config_t &cfg) {
     inited_ = false;
     return false;
   }
+  Serial.printf("[espnow] init ok ch=%u%s\n", (unsigned)WiFi.channel(),
+                sta_up ? " (sta -> AP channel)" : "");
   esp_now_register_recv_cb(&EspNowInterface::on_recv);
   esp_now_register_send_cb(&EspNowInterface::on_sent);
 
