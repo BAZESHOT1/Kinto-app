@@ -31,7 +31,7 @@ jobs:
         run: |
           npm ci
           npm run build:web
-          tar -czf ../../klinto-web.tgz dist
+          tar -czf ../klinto-web.tgz dist
 
       - name: Publish release web-latest
         env:
