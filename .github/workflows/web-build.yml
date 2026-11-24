@@ -1,0 +1,46 @@
+name: Web client
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'client/**'
+      - '.github/workflows/web-build.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  web:
+    # Публикует релиз только публичный репозиторий; в приватном workflow просто
+    # проверяет, что web-сборка собирается.
+    if: github.repository == 'BAZESHOT1/Kinto-app'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: client/package-lock.json
+
+      - name: Build web bundle
+        working-directory: client
+        run: |
+          npm ci
+          npm run build:web
+          tar -czf ../../klinto-web.tgz dist
+
+      - name: Publish release web-latest
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          VERSION=$(node -p "require('./client/package.json').version")
+          NOTES="Web-клиент Kinto ${VERSION} (коммит ${GITHUB_SHA::7}, $(date -u '+%Y-%m-%d %H:%M UTC')).
+          Серверы кластера обновляют веб-клиент этой сборкой: scripts/update-server.sh --with-web."
+          gh release delete web-latest --yes --cleanup-tag 2>/dev/null || true
+          gh release create web-latest klinto-web.tgz \
+            --title "Web client ${VERSION}" \
+            --notes "$NOTES"
