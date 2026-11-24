@@ -1063,6 +1063,13 @@ export default function RootLayout() {
     setMounted(true);
   }, []);
 
+  // Веб: название вкладки всегда «Kinto». Часть экранов ставит title:'' —
+  // react-navigation очищал заголовок, и браузер показывал URL вместо имени.
+  useEffect(() => {
+    if (Platform.OS !== 'web' || typeof document === 'undefined') return;
+    document.title = 'Kinto';
+  }, [pathname]);
+
   // Веб: просим разрешение на уведомления при первом посещении. Некоторые
   // браузеры игнорируют запрос без жеста — повторяем по первому тапу/клавише.
   useEffect(() => {
