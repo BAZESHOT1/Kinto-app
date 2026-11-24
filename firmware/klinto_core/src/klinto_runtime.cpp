@@ -344,9 +344,11 @@ bool KlintoNode::begin() {
 #if defined(CONFIG_IDF_TARGET_ESP32C3)
       WiFi.setTxPower(WIFI_POWER_8_5dBm);
 #endif
-      /* Wi-Fi mesh Long Range: LR-PHY рядом с b/g/n (роутер продолжает работать как обычно). */
-      esp_wifi_set_protocol(WIFI_IF_STA, WIFI_PROTOCOL_11B | WIFI_PROTOCOL_11G | WIFI_PROTOCOL_11N |
-                                             WIFI_PROTOCOL_LR);
+      /* ESP-NOW: только b/g/n. LR-PHY (802.11 long range) на паре C3-шлюз +
+       * ESP32-классик даёт нестабильный приём/передачу (вплоть до зависания
+       * mesh-задачи) — маяки до носимых не доходят. Дальность важнее
+       * совместимости: без LR связь штатная. */
+      esp_wifi_set_protocol(WIFI_IF_STA, WIFI_PROTOCOL_11B | WIFI_PROTOCOL_11G | WIFI_PROTOCOL_11N);
       // Диагностика: какие сети реально видны ESP32 (только 2.4 ГГц).
       const int found = WiFi.scanNetworks();
       Serial.printf("[klinto3] wifi scan: %d networks\n", found);
@@ -382,9 +384,9 @@ bool KlintoNode::begin() {
     WiFi.setTxPower(WIFI_POWER_8_5dBm);
     WiFi.setSleep(false);
     esp_wifi_set_ps(WIFI_PS_NONE);
-    /* Wi-Fi mesh Long Range (как в Esp-Wifi-Ble-Now): LR-PHY на STA в дополнение к b/g/n. */
-    esp_wifi_set_protocol(WIFI_IF_STA, WIFI_PROTOCOL_11B | WIFI_PROTOCOL_11G | WIFI_PROTOCOL_11N |
-                                           WIFI_PROTOCOL_LR);
+    /* Wi-Fi mesh: только b/g/n, без LR-PHY. LR на паре C3+ESP32-классик
+     * ломал ESP-NOW (маяки не доходили), см. комментарий в ветке шлюза. */
+    esp_wifi_set_protocol(WIFI_IF_STA, WIFI_PROTOCOL_11B | WIFI_PROTOCOL_11G | WIFI_PROTOCOL_11N);
   }
 
   if (cfg_.espnow_enabled) {
@@ -543,6 +545,10 @@ void KlintoNode::loop() {
         Serial.printf("[klinto] gateway follows AP channel=%d\n", wifi_channel);
         cell_.lock_gateway((uint8_t)wifi_channel, millis());
       }
+    } else if (cfg_.espnow_enabled) {
+      /* STA переподключается и сам обходит каналы — возвращаем радио соты на
+       * рабочий канал, чтобы маяки не терялись между попытками. */
+      espnow_.setChannel(cell_.channel());
     }
   }
   vTaskDelay(pdMS_TO_TICKS(200));
