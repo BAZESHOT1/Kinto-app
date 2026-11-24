@@ -32,7 +32,7 @@ import { useSounds } from '../src/components/useSounds';
 import { useHaptics } from '../src/components/useHaptics';
 import { onMeshEnvelope } from '../src/modules/meshLink';
 import { decryptEnvelopeAuto, flushOutbox, postReceiptsInBackground, sendMessage } from '../src/data/messaging';
-import { takeUnsentMeshTexts } from '../src/modules/meshLink';
+import { takeUnsentMeshTexts, queueMeshTextForServer } from '../src/modules/meshLink';
 import { isNonceSeen, loadSeenNonces } from '../src/data/seenNonces';
 import { bumpChatInList } from '../src/data/chatListPatch';
 void loadSeenNonces();
@@ -341,7 +341,7 @@ function RealtimeBridge() {
       const me = useStore.getState().me?.username ?? getSession()?.username ?? '';
       for (const item of items) {
         try {
-          const saved = await sendMessage(item.chatId, { text: item.text }, 'text', me, { clientId: item.clientId });
+          const saved = await sendMessage(item.chatId, { text: item.text }, 'text', me, { clientId: item.clientId, httpOnly: true });
           qc.setQueryData<any[]>(['messages', item.chatId], (prev) =>
             Array.isArray(prev)
               ? prev.map((m) =>
@@ -352,7 +352,8 @@ function RealtimeBridge() {
               : prev,
           );
         } catch {
-          /* останется в outbox: уйдёт при следующем подключении */
+          /* не вышло сейчас — вернём в очередь: уйдёт при следующем подключении */
+          queueMeshTextForServer({ chatId: item.chatId, text: item.text, clientId: item.clientId });
         }
       }
     };
@@ -751,6 +752,13 @@ function RealtimeBridge() {
       });
     }, 10_000);
 
+    // Страховка: пока приложение открыто и связь есть, раз в 20 с досылаем
+    // в Hub то, что ушло через mesh (и то, что не ушло вовсе).
+    const strandedTimer = setInterval(() => {
+      if (!useStore.getState().transportOnline) return;
+      void deliverStrandedMeshTexts();
+    }, 20_000);
+
     void connect(session.accessToken);
     // Не ждём исчерпания backoff: health-опрос сразу определяет, есть ли Hub
     // по HTTP (например, когда WebSocket режет провайдер), и работает каждые 5 с,
@@ -853,6 +861,7 @@ function RealtimeBridge() {
       if (reconnectTimer) clearTimeout(reconnectTimer);
       if (fallbackTimer) clearInterval(fallbackTimer);
       if (heartbeatTimer) clearInterval(heartbeatTimer);
+      clearInterval(strandedTimer);
       appStateSub.remove();
       if (hasDomEvents) {
         window.removeEventListener('online', onBrowserOnline);

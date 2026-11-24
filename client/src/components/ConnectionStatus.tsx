@@ -3,6 +3,7 @@ import React from 'react';
 import { Text, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '../theme/useTheme';
+import { useReducedMotion } from './useReducedMotion';
 import { useStore } from '../state/useStore';
 
 export type ConnectionPhase = 'connecting' | 'updating' | 'mesh' | null;
@@ -40,8 +41,73 @@ export function useConnectionPhase(): ConnectionPhase {
 export const CONNECTION_LABEL: Record<'connecting' | 'updating' | 'mesh', string> = {
   connecting: 'Соединение',
   updating: 'Обновление',
-  mesh: 'Mesh',
+  mesh: 'Модуль',
 };
+
+/**
+ * Компактный анимированный индикатор состояния: три пульсирующие точки и
+ * короткая подпись («Соединение», «Обновление»). Используется в шапке чата,
+ * вместо поиска в списке чатов и в баннере над композером.
+ */
+export function ConnectionIndicator({
+  phase,
+  size = 'normal',
+}: {
+  phase: ConnectionPhase;
+  size?: 'normal' | 'large';
+}) {
+  const theme = useTheme();
+  const reduced = useReducedMotion();
+  const [dot, setDot] = React.useState(0);
+  React.useEffect(() => {
+    if (!phase || reduced) return undefined;
+    const timer = setInterval(() => setDot((n) => (n + 1) % 3), 420);
+    return () => clearInterval(timer);
+  }, [phase, reduced]);
+
+  if (!phase) return null;
+  const color = phase === 'connecting' ? theme.warning : theme.accent;
+  const icon = phase === 'connecting' ? 'cloud-offline-outline' : phase === 'mesh' ? 'radio-outline' : 'sync-outline';
+  return (
+    <View
+      style={{
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: size === 'large' ? 8 : 6,
+        minWidth: 0,
+      }}
+      accessibilityLiveRegion="polite"
+      accessibilityLabel={CONNECTION_LABEL[phase]}
+    >
+      <Ionicons name={icon} size={size === 'large' ? 15 : 13} color={color} />
+      <Text
+        numberOfLines={1}
+        style={{
+          color,
+          fontSize: size === 'large' ? 17 : 13.5,
+          fontWeight: '800',
+          letterSpacing: 0.1,
+        }}
+      >
+        {CONNECTION_LABEL[phase]}
+      </Text>
+      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 3 }}>
+        {[0, 1, 2].map((i) => (
+          <View
+            key={i}
+            style={{
+              width: size === 'large' ? 5 : 4,
+              height: size === 'large' ? 5 : 4,
+              borderRadius: 3,
+              backgroundColor: color,
+              opacity: reduced ? 0.5 : dot === i ? 1 : 0.25,
+            }}
+          />
+        ))}
+      </View>
+    </View>
+  );
+}
 
 export function ConnectionPill({ phase }: { phase: ConnectionPhase }) {
   const theme = useTheme();

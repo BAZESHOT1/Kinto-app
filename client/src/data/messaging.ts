@@ -217,6 +217,8 @@ export async function sendMessage(
     asChannel?: boolean;
     /** Схема чата: замок показываем только у секретных (E2E) чатов. */
     scheme?: 'e2e' | 'server';
+    /** Только HTTP (досылка mesh-сообщений в Hub): без mesh-фолбэка и без повторов. */
+    httpOnly?: boolean;
   } = {},
 ): Promise<ViewMessage> {
   const clientId = opts.clientId ?? `loc-${Math.random().toString(16).slice(2, 10)}-${Date.now()}`;
@@ -421,6 +423,8 @@ export async function sendMessage(
   } catch (e) {
     // отмена пользователем не должна попадать в офлайн-очередь
     if (opts.signal?.aborted) throw abortError();
+    // Досылка mesh-сообщения в Hub: только HTTP, без повторной отправки в mesh.
+    if (opts.httpOnly) throw e;
     void e;
     // Нет интернета, но подключён модуль — отдаём шифротекст в USB/BLE mesh.
     const viaMesh = await sendViaMesh(chatId, item);
@@ -473,6 +477,54 @@ function abortError(): Error {
 }
 
 /** Ретрай накопленных сообщений — вызывается из транспорта при появлении связи. */
+/** Отправить один элемент очереди по HTTP. true — элемент ушёл и удалён из очереди. */
+async function sendOutboxItem(item: OutboxItem, myUsername: string): Promise<boolean> {
+  try {
+    const ciphertext = item.objectId.startsWith('encrypted:') ? item.objectId.slice('encrypted:'.length) : item.envelopeB64;
+    const bytes = fromB64u(ciphertext);
+    const uploaded = await uploadEnvelope(bytes);
+    // header из очереди уже содержит scheme/keyVersion/nonce/clientId
+    const parsed = parseHeader(item.header);
+    const queuedReplyTo = typeof parsed.replyTo === 'string' ? parsed.replyTo : undefined;
+    const { replyTo: _queuedReplyTo, ...restHeader } = parsed;
+    void _queuedReplyTo;
+    const header: ChatEnvelopeHeader = {
+      scheme: restHeader.scheme === 'server' ? 'server' : 'e2e',
+      ...(typeof restHeader.keyVersion === 'number' ? { keyVersion: restHeader.keyVersion } : {}),
+      nonce: item.nonce,
+      clientId: item.clientId,
+    };
+    await api.api.sendMessage(item.chatId, {
+      objectId: uploaded.objectId,
+      nonce: item.nonce,
+      header,
+      kind: item.kind,
+      clientId: item.clientId,
+      replyTo: queuedReplyTo,
+      ...(parsed.asChannel === true ? { asChannel: true } : {}),
+      ...(item.kind === 'text' && typeof (item as { text?: unknown }).text === 'string'
+        ? { pushText: String((item as { text?: string }).text).slice(0, 300) }
+        : {}),
+      ...(ciphertext && ciphertext.length <= 8192 ? { inlineB64: ciphertext } : {}),
+    } as never);
+    await removeOutbox(item.id);
+    void myUsername;
+    return true;
+  } catch {
+    await updateOutboxState(item.id, 'failed', item.attempts + 1);
+    return false;
+  }
+}
+
+/** Повторить отправку одного сообщения из очереди (кнопка в меню сообщения). */
+export async function retryOutboxItem(clientId: string): Promise<boolean> {
+  const items = await listOutbox();
+  const item = items.find((i) => i.clientId === clientId || i.id === clientId);
+  if (!item) return false;
+  const me = useStore.getState().me?.username ?? '';
+  return sendOutboxItem(item, me);
+}
+
 export async function flushOutbox(myUsername: string): Promise<ViewMessage[]> {
   const keys = await requireKeys();
   if (!keys) return [];
@@ -480,50 +532,20 @@ export async function flushOutbox(myUsername: string): Promise<ViewMessage[]> {
   const out: ViewMessage[] = [];
 
   for (const item of items) {
-    try {
-      const ciphertext = item.objectId.startsWith('encrypted:') ? item.objectId.slice('encrypted:'.length) : item.envelopeB64;
-      const bytes = fromB64u(ciphertext);
-      const uploaded = await uploadEnvelope(bytes);
-      // header из очереди уже содержит scheme/keyVersion/nonce/clientId
-      const parsed = parseHeader(item.header);
-      const queuedReplyTo = typeof parsed.replyTo === 'string' ? parsed.replyTo : undefined;
-      const { replyTo: _queuedReplyTo, ...restHeader } = parsed;
-      void _queuedReplyTo;
-      const header: ChatEnvelopeHeader = {
-        scheme: restHeader.scheme === 'server' ? 'server' : 'e2e',
-        ...(typeof restHeader.keyVersion === 'number' ? { keyVersion: restHeader.keyVersion } : {}),
-        nonce: item.nonce,
-        clientId: item.clientId,
-      };
-      await api.api.sendMessage(item.chatId, {
-        objectId: uploaded.objectId,
-        nonce: item.nonce,
-        header,
-        kind: item.kind,
-        clientId: item.clientId,
-        replyTo: queuedReplyTo,
-        ...(parsed.asChannel === true ? { asChannel: true } : {}),
-        ...(item.kind === 'text' && typeof (item as { text?: unknown }).text === 'string'
-          ? { pushText: String((item as { text?: string }).text).slice(0, 300) }
-          : {}),
-        ...(ciphertext && ciphertext.length <= 8192 ? { inlineB64: ciphertext } : {}),
-      } as never);
-      await removeOutbox(item.id);
-      out.push({
-        id: item.clientId,
-        seq: Number.MAX_SAFE_INTEGER,
-        senderUsername: myUsername,
-        mine: true,
-        createdAt: item.createdAt,
-        kind: item.kind,
-        delivered: true,
-        failed: false,
-        pending: false,
-        clientId: item.clientId,
-      });
-    } catch {
-      await updateOutboxState(item.id, 'failed', item.attempts + 1);
-    }
+    const ok = await sendOutboxItem(item, myUsername);
+    if (!ok) continue;
+    out.push({
+      id: item.clientId,
+      seq: Number.MAX_SAFE_INTEGER,
+      senderUsername: myUsername,
+      mine: true,
+      createdAt: item.createdAt,
+      kind: item.kind,
+      delivered: true,
+      failed: false,
+      pending: false,
+      clientId: item.clientId,
+    });
   }
   return out;
 }

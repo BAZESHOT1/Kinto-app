@@ -56,7 +56,7 @@ import { EmptyState } from '../../src/components/EmptyState';
 import { SkeletonChatList } from '../../src/components/skeletons/Skeleton';
 import { HeaderCreateMenu } from '../../src/components/HeaderCreateMenu';
 import { ModuleStatusPill } from '../../src/components/ModuleStatusPill';
-import { ConnectionPill, useConnectionPhase } from '../../src/components/ConnectionStatus';
+import { ConnectionIndicator, useConnectionPhase } from '../../src/components/ConnectionStatus';
 import { kv } from '../../src/crypto/storage';
 import { PressableScale } from '../../src/components/chat/PressableScale';
 import { ChatContextMenu } from '../../src/components/chat/ChatContextMenu';
@@ -1851,6 +1851,18 @@ export default function ChatsScreen() {
             measureSearch();
           }}
         >
+          {connectionPhase === 'connecting' || connectionPhase === 'updating' ? (
+            <MotiView
+              key={`conn-${connectionPhase}`}
+              from={{ opacity: 0, translateY: 2 }}
+              animate={{ opacity: 1, translateY: 0 }}
+              transition={{ type: 'timing', duration: 180 }}
+            >
+              <Glass radius={20} fill={GLASS_FILL_BUTTON} style={[styles.searchWrap, { justifyContent: 'center' }]}>
+                <ConnectionIndicator phase={connectionPhase} />
+              </Glass>
+            </MotiView>
+          ) : (
           <SearchField
             ref={searchRef}
             value={search}
@@ -1880,6 +1892,7 @@ export default function ChatsScreen() {
             }}
             placeholder="Поиск"
           />
+          )}
         </View>
         <Reanimated.View style={[styles.headerCreate, headerCreateStyle]}>
           <HeaderCreateMenu />

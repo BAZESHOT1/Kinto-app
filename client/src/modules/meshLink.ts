@@ -100,6 +100,8 @@ async function flushV1Queue(): Promise<void> {
         pendingV1.splice(pendingV1.indexOf(item), 1);
         activeClientId = undefined;
         emitQueue();
+        // Доставлено по mesh — запомним для досылки в Hub, как только появится интернет.
+        queueMeshTextForServer({ chatId: item.chatId, text: item.text, clientId: item.clientId });
         console.log('[kmesh]', 'queued text sent', item.chatId);
       } catch {
         item.attempts += 1;
@@ -166,12 +168,62 @@ export function canSendViaMesh(): boolean {
 }
 
 /**
- * Забрать тексты, которые ещё не ушли в модуль (модуль отключён или не принял). Вызывается при
- * появлении интернета: такие сообщения надёжнее отправить сразу по HTTP, чем ждать модуль.
+ * Забрать тексты, которые ещё не ушли в модуль (модуль отключён или не принял), а также
+ * тексты, доставленные по mesh, но ещё не сохранённые в Hub. Вызывается при появлении
+ * интернета: такие сообщения надёжнее отправить по HTTP, чем ждать модуль.
  */
 export function takeUnsentMeshTexts(): Array<{ chatId: string; text: string; clientId?: string }> {
-  const out = pendingV1.splice(0, pendingV1.length).map(({ chatId, text, clientId }) => ({ chatId, text, clientId }));
-  return out;
+  const unsent = pendingV1.splice(0, pendingV1.length).map(({ chatId, text, clientId }) => ({ chatId, text, clientId }));
+  const delivered = takeMeshTextsForServer();
+  return [...unsent, ...delivered];
+}
+
+/* ------------------------------------------------- учёт mesh-сообщений для Hub ---- */
+
+/**
+ * Тексты, реально доставленные по mesh, но ещё не зарегистрированные в Hub.
+ * При появлении интернета уходят HTTP-путём (Hub дедуплицирует по clientId),
+ * поэтому история не теряется и второе устройство получателя их увидит.
+ */
+const SERVER_SYNC_KEY = 'sg:mesh-server-sync';
+type ServerSyncText = { chatId: string; text: string; clientId?: string };
+let serverSync: ServerSyncText[] = readServerSync();
+
+function readServerSync(): ServerSyncText[] {
+  if (typeof localStorage === 'undefined') return [];
+  try {
+    const raw = localStorage.getItem(SERVER_SYNC_KEY);
+    const parsed = raw ? (JSON.parse(raw) as unknown) : [];
+    return Array.isArray(parsed) ? (parsed.filter((i) => i && typeof i.chatId === 'string' && typeof i.text === 'string') as ServerSyncText[]) : [];
+  } catch {
+    return [];
+  }
+}
+
+function writeServerSync(items: ServerSyncText[]): void {
+  serverSync = items.slice(0, 200);
+  if (typeof localStorage === 'undefined') return;
+  try {
+    localStorage.setItem(SERVER_SYNC_KEY, JSON.stringify(serverSync));
+  } catch {
+    /* переполнение квоты — не критично */
+  }
+}
+
+/** Сообщение ушло по mesh: запомним, чтобы дослать в Hub при появлении интернета. */
+export function queueMeshTextForServer(item: ServerSyncText): void {
+  if (!item.chatId || !item.text) return;
+  const key = item.clientId || `${item.chatId}:${item.text}`;
+  const items = serverSync.filter((i) => (i.clientId || `${i.chatId}:${i.text}`) !== key);
+  items.push({ chatId: item.chatId, text: item.text, clientId: item.clientId });
+  writeServerSync(items);
+}
+
+/** Забрать (и очистить) очередь досылки mesh-сообщений в Hub. */
+export function takeMeshTextsForServer(): ServerSyncText[] {
+  const items = serverSync;
+  writeServerSync([]);
+  return items;
 }
 
 /** Отправка текста только через KMesh_v1 (без legacy-конверта). */

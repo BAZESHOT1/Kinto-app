@@ -60,6 +60,8 @@ import {
   attachAndSendWithProgress,
   decryptEnvelopeAuto,
   decryptMany,
+  retryOutboxItem,
+  sendMessage,
   type ViewMessage,
 } from '../../../src/data/messaging';
 
@@ -71,7 +73,7 @@ import * as api from '../../../src/data/api';
 import { useStore } from '../../../src/state/useStore';
 import { useSounds } from '../../../src/components/useSounds';
 import { useHaptics } from '../../../src/components/useHaptics';
-import { CONNECTION_LABEL, useConnectionPhase } from '../../../src/components/ConnectionStatus';
+import { useConnectionPhase } from '../../../src/components/ConnectionStatus';
 import {
   getDraft,
   getLastReadMessageId,
@@ -207,7 +209,6 @@ function ChatScreen({ forcedId }: { forcedId?: string } = {}) {
   const [older, setOlder] = useState<ViewMessage[]>([]);
   const [hasMore, setHasMore] = useState(true);
   const [loadingOlder, setLoadingOlder] = useState(false);
-  const [netAttempts, setNetAttempts] = useState(0);
 
   const uploadsRef = useRef(new Map<string, UploadHandle>());
   const uploadCleanupRef = useRef(new Map<string, ReturnType<typeof setTimeout>>());
@@ -724,16 +725,8 @@ function ChatScreen({ forcedId }: { forcedId?: string } = {}) {
         ? 'mesh'
         : undefined;
 
-  // Счётчик попыток переподключения: тикает только в режиме ожидания сети.
-  useEffect(() => {
-    if (channel !== 'waiting') {
-      setNetAttempts(0);
-      return undefined;
-    }
-    setNetAttempts((n) => n + 1);
-    const t = setInterval(() => setNetAttempts((n) => n + 1), 3000);
-    return () => clearInterval(t);
-  }, [channel]);
+  // Счётчик попыток переподключения больше не нужен: статус показывает
+  // ConnectionIndicator («Соединение»/«Обновление») без лишних подробностей.
 
   /* ----------------------------------------------------------- ключи чата */
   useEffect(() => {
@@ -1520,6 +1513,44 @@ function ChatScreen({ forcedId }: { forcedId?: string } = {}) {
     }
   }
 
+  async function retryMessage(m: ViewMessage) {
+    setSheetMessage(null);
+    const clientId = m.clientId ?? m.id;
+    if (!m.text) {
+      pushToast({ kind: 'info', message: 'Вложение нужно отправить заново из композера' });
+      return;
+    }
+    // Интернет есть — досылаем в Hub по HTTP (очередь дедуплицируется по clientId).
+    if (useStore.getState().transportOnline) {
+      const fromOutbox = await retryOutboxItem(clientId).catch(() => false);
+      if (!fromOutbox) {
+        // Сообщение шло через mesh и не попало в outbox — отправляем текст напрямую.
+        try {
+          await sendMessage(
+            chatId,
+            { text: m.text },
+            'text',
+            useStore.getState().me?.username ?? '',
+            { clientId, httpOnly: true },
+          );
+        } catch {
+          pushToast({ kind: 'error', message: 'Не удалось отправить — проверим связь и повторим' });
+          return;
+        }
+      }
+      pushToast({ kind: 'success', message: 'Отправлено' });
+      void chatQuery.refetch();
+      return;
+    }
+    // Офлайн — повторно через модуль kMesh.
+    const { sendTextViaMesh } = await import('../../../src/modules/meshLink');
+    const sent = await sendTextViaMesh(chatId, m.text, clientId).catch(() => false);
+    pushToast({
+      kind: sent ? 'info' : 'error',
+      message: sent ? 'Отправлено через модуль' : 'Нет связи — сообщение останется в очереди',
+    });
+  }
+
   function removeLocalMessage(m: ViewMessage) {
     const key = m.clientId ?? m.id;
     removeOptimistic(key);
@@ -1851,7 +1882,7 @@ function ChatScreen({ forcedId }: { forcedId?: string } = {}) {
           title={title || 'Диалог'}
           channel={channel}
           linkMode={linkMode}
-          statusText={connectionPhase ? CONNECTION_LABEL[connectionPhase] : null}
+          statusPhase={connectionPhase}
           secret={secret}
           typingUsername={typingUsername}
           scrollY={scrollY}
@@ -2034,7 +2065,7 @@ function ChatScreen({ forcedId }: { forcedId?: string } = {}) {
           </MotiView>
         ) : null}
 
-        <NetworkBanner visible={channel === 'waiting'} attempts={netAttempts} />
+        <NetworkBanner phase={connectionPhase} />
 
         {replyTo ? <ReplyBar mode="reply" username={replyTo.senderUsername} text={replyTo.text || replyTo.file?.name || 'Вложение'} onClose={cancelReplyOrEdit} /> : null}
         {editing ? <ReplyBar mode="edit" text={editing.text || ''} onClose={cancelReplyOrEdit} /> : null}
@@ -2222,6 +2253,7 @@ function ChatScreen({ forcedId }: { forcedId?: string } = {}) {
           onEdit={() => sheetMessage && startEdit(sheetMessage)}
           onDelete={() => sheetMessage && confirmDelete(sheetMessage)}
           onPin={() => void pinMessage(sheetMessage)}
+          onRetry={() => sheetMessage && void retryMessage(sheetMessage)}
         />
 
         <AttachmentsGallery visible={galleryOpen} messages={allMessages} onClose={() => setGalleryOpen(false)} />

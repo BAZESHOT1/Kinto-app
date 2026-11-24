@@ -7,6 +7,7 @@ import { MotiView } from 'moti';
 import { useTheme } from '../../theme/useTheme';
 import { Avatar } from '../Avatar';
 import { useReducedMotion } from '../useReducedMotion';
+import { ConnectionIndicator, type ConnectionPhase } from '../ConnectionStatus';
 import { PressableScale } from './PressableScale';
 import { motion } from '../../theme/motion';
 import { plural } from './roles';
@@ -96,6 +97,7 @@ export function ChatHeader({
   membersCount,
   linkMode,
   statusText,
+  statusPhase,
 }: {
   title: string;
   channel: ChatChannel;
@@ -126,6 +128,8 @@ export function ChatHeader({
   membersCount?: number;
   /** Текущий канал доставки (для бейджа в шапке). */
   linkMode?: 'internet' | 'gateway' | 'mesh';
+  /** Анимированный статус вместо имени: «Соединение» / «Обновление». */
+  statusPhase?: ConnectionPhase;
 }) {
   const theme = useTheme();
   const reduced = useReducedMotion();
@@ -213,9 +217,20 @@ export function ChatHeader({
           <Glass radius={wide ? 24 : 29} fill={GLASS_FILL_BUTTON} style={[styles.pill, wide && { height: 50 }]}>
             <View style={{ flexDirection: 'row', alignItems: 'center', maxWidth: '100%' }}>
               {secret ? <Ionicons name="lock-closed" size={14} color={theme.accent} style={{ marginRight: 5 }} /> : null}
-              <Text numberOfLines={1} style={{ color: theme.textPrimary, fontWeight: '800', fontSize: titleSize, flexShrink: 1 }}>
-                {title || 'Диалог'}
-              </Text>
+              {statusPhase === 'connecting' || statusPhase === 'updating' ? (
+                <MotiView
+                  key={`phase-${statusPhase}`}
+                  from={reduced ? { opacity: 1 } : { opacity: 0, translateY: 3 }}
+                  animate={{ opacity: 1, translateY: 0 }}
+                  transition={reduced ? { type: 'timing', duration: 0 } : motion.softSpring}
+                >
+                  <ConnectionIndicator phase={statusPhase} size="large" />
+                </MotiView>
+              ) : (
+                <Text numberOfLines={1} style={{ color: theme.textPrimary, fontWeight: '800', fontSize: titleSize, flexShrink: 1 }}>
+                  {title || 'Диалог'}
+                </Text>
+              )}
             </View>
             <MotiView
               key={`${typingUsername ? 'typing' : channel}-${subtitle}`}

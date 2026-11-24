@@ -1,15 +1,24 @@
 import React from 'react';
-import { Modal, Pressable, StyleSheet, Text, View } from 'react-native';
+import { Modal, Platform, Pressable, StyleSheet, Text, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import * as Haptics from 'expo-haptics';
 import { MotiView } from 'moti';
 import { useTheme } from '../../theme/useTheme';
 import type { ViewMessage } from '../../data/messaging';
 
 const QUICK_REACTIONS = ['👍', '❤️', '😂', '😮', '😢', '🔥'];
 
+const fmtTime = (iso: string) => {
+  try {
+    return new Date(iso).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' });
+  } catch {
+    return '';
+  }
+};
+
 /**
- * Меню долгого нажатия на сообщение: быстрые реакции и действия.
- * Открывается снизу как лист, закрывается тапом по фону.
+ * Меню долгого нажатия на сообщение: быстрые реакции, повтор отправки и действия.
+ * Открывается снизу как лист, закрывается тапом по фону; на мобильных даёт тактильный отклик.
  */
 export function MessageActionSheet({
   message,
@@ -21,6 +30,7 @@ export function MessageActionSheet({
   onEdit,
   onDelete,
   onPin,
+  onRetry,
   allowCopy = true,
 }: {
   message: ViewMessage | null;
@@ -32,12 +42,32 @@ export function MessageActionSheet({
   onEdit: () => void;
   onDelete: () => void;
   onPin: () => void;
+  /** Повторить отправку несостоявшегося сообщения. */
+  onRetry?: () => void;
   /** Секретный чат: копирование/пересылка запрещены. */
   allowCopy?: boolean;
 }) {
   const theme = useTheme();
+  const open = Boolean(message);
+
+  // Тактильный отклик при открытии меню (на web — no-op).
+  React.useEffect(() => {
+    if (!open || Platform.OS === 'web') return;
+    void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => undefined);
+  }, [open, message?.id]);
+
+  const failed = Boolean(message?.failed);
+  const canRetry = Boolean(onRetry) && failed && Boolean(message?.mine);
+  const canEdit = Boolean(message?.mine) && message?.kind === 'text' && !failed && Boolean(message?.id);
+  const preview = message
+    ? message.kind === 'media'
+      ? 'Вложение'
+      : message.text || 'Зашифрованное сообщение'
+    : '';
+  const icon: keyof typeof Ionicons.glyphMap = message?.kind === 'media' ? 'image-outline' : 'chatbubble-ellipses-outline';
+
   return (
-    <Modal visible={Boolean(message)} transparent animationType="fade" onRequestClose={onClose}>
+    <Modal visible={open} transparent animationType="fade" onRequestClose={onClose}>
       <View style={styles.root}>
         <Pressable
           style={[StyleSheet.absoluteFill, { backgroundColor: theme.overlay }]}
@@ -47,20 +77,31 @@ export function MessageActionSheet({
         />
         {message ? (
           <MotiView
-            from={{ opacity: 0, translateY: 40, scale: 0.97 }}
+            from={{ opacity: 0, translateY: 36, scale: 0.98 }}
             animate={{ opacity: 1, translateY: 0, scale: 1 }}
-            transition={{ type: 'spring', damping: 26, stiffness: 300 }}
+            transition={{ type: 'spring', damping: 25, stiffness: 320 }}
             style={[styles.sheet, { backgroundColor: theme.surfaceElevated, borderColor: theme.line, ...theme.shadow }]}
           >
             <View style={styles.grabber}>
               <View style={{ width: 38, height: 4, borderRadius: 2, backgroundColor: theme.line }} />
             </View>
 
-            <Text style={{ color: theme.textSecondary, fontSize: 12.5 }} numberOfLines={2}>
-              {message.kind === 'system'
-                ? message.text
-                : `${message.senderUsername}: ${message.text || (message.kind === 'media' ? 'Вложение' : 'Зашифрованное сообщение')}`}
-            </Text>
+            {/* Превью сообщения: иконка, автор, время и текст. */}
+            <View style={[styles.preview, { backgroundColor: theme.surface, borderColor: theme.line }]}>
+              <Ionicons name={icon} size={16} color={theme.textSecondary} />
+              <View style={{ flex: 1, minWidth: 0 }}>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                  <Text numberOfLines={1} style={{ color: theme.textPrimary, fontSize: 12.5, fontWeight: '800', flexShrink: 1 }}>
+                    {message.mine ? 'Вы' : message.senderUsername}
+                  </Text>
+                  <Text style={{ color: theme.textSecondary, fontSize: 11 }}>{fmtTime(message.createdAt)}</Text>
+                  {failed ? <Ionicons name="alert-circle" size={12} color={theme.danger} /> : null}
+                </View>
+                <Text numberOfLines={2} style={{ color: theme.textSecondary, fontSize: 12.5, marginTop: 1 }}>
+                  {preview}
+                </Text>
+              </View>
+            </View>
 
             <View style={[styles.reactions, { borderColor: theme.line }]}>
               {QUICK_REACTIONS.map((emoji) => (
@@ -82,15 +123,18 @@ export function MessageActionSheet({
               ))}
             </View>
 
+            {canRetry ? (
+              <Action icon="refresh-circle-outline" label="Повторить отправку" accent onPress={onRetry!} />
+            ) : null}
             <Action icon="arrow-undo-outline" label="Ответить" onPress={onReply} />
-            {allowCopy ? <Action icon="copy-outline" label="Копировать" onPress={onCopy} /> : null}
-            {message.mine ? <Action icon="create-outline" label="Изменить" onPress={onEdit} /> : null}
-            {message.mine ? (
+            {allowCopy && message.text ? <Action icon="copy-outline" label="Копировать" onPress={onCopy} /> : null}
+            {canEdit ? <Action icon="create-outline" label="Изменить" onPress={onEdit} /> : null}
+            {canEdit ? (
               <Action icon={pinned ? 'pin-outline' : 'pin'} label={pinned ? 'Открепить' : 'Закрепить'} onPress={onPin} />
             ) : null}
             <Action
-              icon={message.pending || message.failed ? 'close-circle-outline' : 'trash-outline'}
-              label={message.pending || message.failed ? 'Отменить отправку' : 'Удалить'}
+              icon={message.pending || failed ? 'close-circle-outline' : 'trash-outline'}
+              label={message.pending || failed ? 'Убрать сообщение' : 'Удалить'}
               danger
               onPress={onDelete}
             />
@@ -106,14 +150,16 @@ function Action({
   label,
   onPress,
   danger,
+  accent,
 }: {
   icon: keyof typeof Ionicons.glyphMap;
   label: string;
   onPress: () => void;
   danger?: boolean;
+  accent?: boolean;
 }) {
   const theme = useTheme();
-  const color = danger ? theme.danger : theme.textPrimary;
+  const color = danger ? theme.danger : accent ? theme.accent : theme.textPrimary;
   return (
     <Pressable
       onPress={onPress}
@@ -121,7 +167,7 @@ function Action({
       accessibilityLabel={label}
       style={({ pressed }) => [styles.action, { backgroundColor: pressed ? (danger ? theme.dangerSoft : theme.surfacePressed) : 'transparent' }]}
     >
-      <Ionicons name={icon} size={18} color={danger ? theme.danger : theme.textSecondary} />
+      <Ionicons name={icon} size={18} color={danger ? theme.danger : accent ? theme.accent : theme.textSecondary} />
       <Text style={{ color, fontSize: 15, flex: 1 }}>{label}</Text>
     </Pressable>
   );
@@ -142,7 +188,25 @@ const styles = StyleSheet.create({
     gap: 6,
   },
   grabber: { alignItems: 'center', paddingVertical: 6 },
-  reactions: { flexDirection: 'row', justifyContent: 'space-between', gap: 6, borderTopWidth: 1, borderBottomWidth: 1, paddingVertical: 8, marginVertical: 4 },
+  preview: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 9,
+    borderWidth: 1,
+    borderRadius: 12,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    marginBottom: 2,
+  },
+  reactions: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    gap: 6,
+    borderTopWidth: 1,
+    borderBottomWidth: 1,
+    paddingVertical: 8,
+    marginVertical: 4,
+  },
   reactionBtn: { width: 44, height: 44, borderRadius: 22, alignItems: 'center', justifyContent: 'center' },
   action: {
     flexDirection: 'row',
