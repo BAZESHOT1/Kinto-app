@@ -15,8 +15,12 @@
 #include "klinto_dedup.h"
 #include "klinto_net.h"
 
+#ifndef KL_ROUTE_TABLE_SIZE
 #define KL_ROUTE_TABLE_SIZE 256
+#endif
+#ifndef KL_NEIGHBOR_TABLE
 #define KL_NEIGHBOR_TABLE 64
+#endif
 #define KL_PENDING_QUEUE 12
 #define KL_ACK_TABLE 16
 #define KL_BCAST_QUEUE 8

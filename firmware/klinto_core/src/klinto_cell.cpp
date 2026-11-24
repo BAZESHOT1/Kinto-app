@@ -2,6 +2,10 @@
 
 #include <string.h>
 
+/* Период полного обхода каналов при подключённом телефоне (BLE quiet-режим):
+ * редкие короткие сканы не рвут BLE постоянно, но возвращают узел к шлюзу. */
+static constexpr uint32_t KL_QUIET_RESCAN_MS = 15000u;
+
 KlintoCellManager::KlintoCellManager()
     : state_(KL_CELL_LOCKED),
       current_channel_(KL_FALLBACK_OFFLINE_CHANNEL),
@@ -198,18 +202,24 @@ void KlintoCellManager::tick(uint32_t now_ms) {
     return;
   }
 
-  /* Телефон подключён по BLE: радио не прыгает по каналам (скачки Wi-Fi отбирали эфир у BLE
-   * и рвали соединение через ~5 с, см. BitChatRelay/Esp-Wifi-Ble-Now — канал закреплён).
-   * Остаёмся на предпочтительном канале и раз в 3 с шлём пробу. */
-  if (quiet_ && state_ != KL_CELL_LOCKED) {
-    if (state_ == KL_CELL_SCANNING || (pref_channel_ && current_channel_ != pref_channel_)) {
-      state_ = KL_CELL_OFFLINE;
+  /* Телефон подключён по BLE: радио не прыгает по каналам постоянно (скачки Wi-Fi
+   * отбирали эфир у BLE и рвали соединение через ~5 с, см. BitChatRelay/Esp-Wifi-Ble-Now).
+   * НО залипать без шлюза нельзя: BLE-оптимизация не должна отменять восстановление
+   * связи. Начатый обход доводим до конца, а в офлайне периодически начинаем новый
+   * (короткий, ~2 с; телефон переподключится, зато узел найдёт шлюз). */
+  if (quiet_ && state_ != KL_CELL_LOCKED && state_ != KL_CELL_SCANNING) {
+    if (pref_channel_ && current_channel_ != pref_channel_) {
       reset_candidate();
       apply(pref_channel_ ? pref_channel_ : current_channel_);
     }
     if (now_ms - quiet_probe_ms_ >= 3000) {
       quiet_probe_ms_ = now_ms;
       if (host_.send_probe) host_.send_probe(host_.ctx);
+    }
+    if (state_ == KL_CELL_OFFLINE && now_ms - last_scan_ms_ >= KL_QUIET_RESCAN_MS) {
+      start_scan(now_ms, KL_SCAN_PERIODIC);
+      /* При подключённом телефоне хватает одного прохода по каналам (~2 с). */
+      scan_cycle_ = cell_.max_scan_cycles - 1;
     }
     return;
   }

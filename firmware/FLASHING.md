@@ -46,14 +46,17 @@ cp ../src/*.c ../src/*.cpp ../src/*.h ../include/*.h .
 arduino-cli config init
 arduino-cli core update-index
 arduino-cli core install esp32:esp32 --additional-urls https://espressif.github.io/arduino-esp32/package_esp32_index.json
-# версия 2.0.17 рекомендована: 3.x меняет API, LoRa/RadioLib может не собраться
-arduino-cli core install esp32:esp32@2.0.17 --additional-urls https://espressif.github.io/arduino-esp32/package_esp32_index.json
+# 3.x обязательна: код ESP-NOW в klinto_core использует API ядра 3.x
+arduino-cli core install esp32:esp32@3.3.12 --additional-urls https://espressif.github.io/arduino-esp32/package_esp32_index.json
 
 arduino-cli lib install RadioLib@8.0.0
 arduino-cli lib install NimBLE-Arduino@2.5.2
 arduino-cli lib install ArduinoJson@7.4.3
 arduino-cli lib install LoRa@0.8.0
 ```
+
+> Ядро **3.x обязательно**: код ESP-NOW в klinto_core использует API ядра 3.x
+> (`esp_now_recv_info_t`). На 2.0.17 сборка не пройдёт.
 
 ## Шаг 3. config.h
 
@@ -284,7 +287,7 @@ LoRa и, если нужен BLE, убедитесь что чип поддер�
 | Симптом | Причина / решение |
 |---|---|
 | `sketch too big` | не хватает флагов `-Os`/excludes (шаг 5) или не та таблица разделов |
-| RadioLib не собирается | ядро ESP32 3.x — откатитесь на 2.0.17 (шаг 2) |
+| RadioLib не собирается | проверьте версию ядра: код требует 3.x (см. шаг 2) |
 | модуль не виден в приложении | проверьте `KL_MODULE_TOKEN`/`tempKey` (шаг 6) и что Hub доступен с платы |
 | нет Serial-логов на C3 | включён `CDCOnBoot=cdc`, USB-кабель с данными |
 | OTA не работает | `KL_OTA 1` + таблица с app0/app1; в deep sleep OTA недоступна |

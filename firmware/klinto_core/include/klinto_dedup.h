@@ -9,7 +9,9 @@
 
 #include "klinto_util.h"
 
+#ifndef KL_DEDUP_SIZE
 #define KL_DEDUP_SIZE 512
+#endif
 #define KL_DEDUP_TTL_MS 60000u
 
 struct kl_dedup_entry_t {
