@@ -1,0 +1,980 @@
+/**
+ * Упрощённый визард прошивки для сценария «модуль нужно прошить».
+ *
+ * Отличия от полного FirmwareWizard:
+ *  - сначала тип модуля, затем плата, связь, батарея и (для шлюза) Wi-Fi;
+ *  - нет шага Hub/привязки, токенов, пинов LoRa и SSID mesh-сети;
+ *  - после сборки — FlashStep и показ 8-значного публичного ID.
+ *
+ * Глобальные параметры (SG-MESH, канал 11, 869.525 МГц) подставляет сервер,
+ * поэтому в интерфейсе они только для чтения.
+ */
+import React from 'react';
+import { Animated, Easing, Linking, Platform, Text, View } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
+import { Btn } from '../Btn';
+import { useTheme } from '../../theme/useTheme';
+import { GlassCard, SettingsToggle } from '../settings/SettingsUI';
+import { SettingsInput, StatusBadge } from '../settings/SettingsWidgets';
+import {
+  BOARDS,
+  boardPreset,
+  recommendedBatteryPin,
+  recommendedPins,
+  type LoraChip,
+  type LoraPins,
+} from '../firmware/types';
+import { FlashStep } from '../firmware/FlashStep';
+import { ChoiceCard, ErrorText, Note, StepCard } from '../firmware/FirmwareUI';
+import { api, isPendingTransfer, type FirmwareBoard, type FirmwareConfig, type FirmwareBuild, type FirmwareRole } from '../../data/api';
+import { kv } from '../../crypto/storage';
+import { useModuleConnection } from '../../modules/ModuleProvider';
+import { writeLastModule } from '../../modules/types';
+import { MESH_ALWAYS } from './moduleUi';
+
+export interface SimpleFirmwareResult {
+  hardwareId: string;
+  publicId?: string;
+  moduleId?: string;
+  /** Роль, выбранная в мастере прошивки. */
+  role: FirmwareRole;
+}
+
+type Step = 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9;
+type LinkChoice = 'wifi' | 'wifi_lora' | 'lora';
+
+/** Человекочитаемые фазы серверной сборки. */
+const BUILD_PHASE_LABEL: Record<string, string> = {
+  queued: 'В очереди',
+  preparing: 'Подготовка',
+  compiling: 'Компиляция',
+  linking: 'Линковка',
+  finalizing: 'Финализация',
+  ready: 'Готово',
+  failed: 'Ошибка',
+  timeout: 'Таймаут',
+};
+
+function buildPhaseLabel(build: FirmwareBuild): string {
+  if (build.status === 'ready') return BUILD_PHASE_LABEL.ready;
+  if (build.status === 'failed') return BUILD_PHASE_LABEL[build.phase ?? ''] ?? BUILD_PHASE_LABEL.failed;
+  return BUILD_PHASE_LABEL[build.phase ?? ''] ?? (build.status === 'queued' ? BUILD_PHASE_LABEL.queued : 'Подготовка');
+}
+
+/**
+ * Полоса прогресса, плавно доезжающая до нового значения (общий ProgressBar
+ * перезапускает анимацию с нуля, из-за чего обновления каждые 4.5 с мигают).
+ */
+function BuildProgressBar({ pct }: { pct: number }) {
+  const theme = useTheme();
+  const clamped = Math.max(0, Math.min(100, Number.isFinite(pct) ? pct : 0));
+  const value = React.useRef(new Animated.Value(clamped)).current;
+
+  React.useEffect(() => {
+    const animation = Animated.timing(value, {
+      toValue: clamped,
+      duration: 900,
+      easing: Easing.out(Easing.cubic),
+      useNativeDriver: false,
+    });
+    animation.start();
+    return () => animation.stop();
+  }, [clamped, value]);
+
+  return (
+    <View
+      style={{
+        height: 6,
+        borderRadius: 999,
+        overflow: 'hidden',
+        backgroundColor: theme.surfacePressed,
+      }}
+    >
+      <Animated.View
+        style={{
+          height: '100%',
+          borderRadius: 999,
+          backgroundColor: theme.accent,
+          width: value.interpolate({ inputRange: [0, 100], outputRange: ['0%', '100%'] }),
+        }}
+      />
+    </View>
+  );
+}
+
+const ROLE_OPTIONS: Array<{
+  id: FirmwareRole;
+  icon: keyof typeof Ionicons.glyphMap;
+  title: string;
+  subtitle: string;
+  description: string;
+}> = [
+  {
+    id: 'wearable',
+    icon: 'watch-outline',
+    title: 'Носимый',
+    subtitle: 'подключается к клиенту по BLE/USB',
+    description: 'Связывает клиента с mesh-сетью напрямую. Носите с собой или закрепите рядом.',
+  },
+  {
+    id: 'repeater',
+    icon: 'radio-outline',
+    title: 'Ретранслятор',
+    subtitle: 'расширяет покрытие',
+    description: 'Повторяет сигнал между модулями. Достаточно питания, интернет не обязателен.',
+  },
+  {
+    id: 'gateway',
+    icon: 'git-network-outline',
+    title: 'Шлюз',
+    subtitle: 'выходит в интернет',
+    description: 'Подключается к вашему Wi-Fi-роутеру и передаёт сообщения mesh-сети на Hub.',
+  },
+];
+
+export function SimpleFirmwareWizard({
+  initialRole,
+  onCancel,
+  onComplete,
+  onStepChange,
+}: {
+  initialRole?: FirmwareRole;
+  onCancel: () => void;
+  onComplete: (result: SimpleFirmwareResult) => void;
+  /** Сообщает внешнему мастеру текущий шаг: 8 — прошивка, закрывать нельзя. */
+  onStepChange?: (step: number) => void;
+}) {
+  const theme = useTheme();
+  const moduleConnection = useModuleConnection();
+
+  const [step, setStep] = React.useState<Step>(initialRole ? 2 : 1);
+  const [role, setRole] = React.useState<FirmwareRole>(initialRole ?? 'wearable');
+  const [board, setBoard] = React.useState<FirmwareBoard>('esp32c3');
+  const [link, setLink] = React.useState<LinkChoice>('wifi_lora');
+  /** Пин делителя батареи: пусто — батареи нет. */
+  const [batteryPinText, setBatteryPinText] = React.useState('');
+  const batteryPin = batteryPinText.trim() === '' ? -1 : Number(batteryPinText);
+  const battery = batteryPin >= 0;
+  const [moduleName, setModuleName] = React.useState('');
+  const [batteryRatio, setBatteryRatio] = React.useState(2);
+  const [loraChip, setLoraChip] = React.useState<LoraChip>('sx1262');
+  const [loraPins, setLoraPins] = React.useState<LoraPins>(() => recommendedPins('esp32c3'));
+  const [ledPin, setLedPin] = React.useState<number | undefined>(undefined);
+
+  React.useEffect(() => {
+    setLoraPins(recommendedPins(board));
+    setLoraChip(board === 'esp32' ? 'sx1278' : 'sx1262');
+  }, [board]);
+  const [ssid, setSsid] = React.useState('');
+  const [password, setPassword] = React.useState('');
+  const [stepError, setStepError] = React.useState('');
+
+  const [availableBoards, setAvailableBoards] = React.useState<FirmwareBoard[] | null>(null);
+  const [build, setBuild] = React.useState<FirmwareBuild | null>(null);
+  const buildStartedAtRef = React.useRef(0);
+  const buildErrorCountRef = React.useRef(0);
+  const [building, setBuilding] = React.useState(false);
+  const [buildError, setBuildError] = React.useState('');
+  const [result, setResult] = React.useState<SimpleFirmwareResult | null>(null);
+  const [readError, setReadError] = React.useState('');
+  const [boundName, setBoundName] = React.useState('');
+
+  // Сообщаем внешнему мастеру шаг — на шаге прошивки он блокирует закрытие.
+  React.useEffect(() => {
+    onStepChange?.(step);
+  }, [step, onStepChange]);
+
+  // Какие платы реально умеет серверный сборщик (если он отвечает).
+  React.useEffect(() => {
+    let alive = true;
+    void api
+      .firmwareBuilderStatus()
+      .then((status) => {
+        if (!alive) return;
+        const boards = (status.boards ?? []).filter((value): value is FirmwareBoard =>
+          BOARDS.some((item) => item.id === value),
+        );
+        if (boards.length) {
+          setAvailableBoards(boards);
+          if (!boards.includes(board)) setBoard(boards[0]);
+        }
+      })
+      .catch(() => undefined);
+    return () => {
+      alive = false;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Поллинг сборки. Core 3.x первая сборка может идти несколько минут;
+  // после 15 минут показываем честную ошибку вместо вечного «сборка…».
+  // Важно: именно setInterval, а не один setTimeout — иначе статус
+  // «building» не меняется, эффект не перезапускается и опрос замирает.
+  React.useEffect(() => {
+    if (!build?.id || build.status === 'ready' || build.status === 'failed') return undefined;
+    let cancelled = false;
+
+    const tick = async () => {
+      if (cancelled) return;
+      const elapsed = Date.now() - (buildStartedAtRef.current || Date.now());
+      if (elapsed > 15 * 60 * 1000) {
+        setBuildError('Сборка идёт слишком долго (более 15 минут). Проверьте сборщик и попробуйте снова.');
+        setBuild((prev) => (prev ? { ...prev, status: 'failed' } : prev));
+        return;
+      }
+      try {
+        const next = await api.firmwareBuild(build.id);
+        if (cancelled) return;
+        buildErrorCountRef.current = 0;
+        setBuildError('');
+        setBuild(next);
+      } catch (error) {
+        if (cancelled) return;
+        buildErrorCountRef.current += 1;
+        if (buildErrorCountRef.current >= 5) {
+          setBuildError(
+            `Не удаётся получить статус сборки: ${error instanceof Error ? error.message : String(error)}. Нажмите «Повторить».`,
+          );
+          setBuild((prev) => (prev ? { ...prev, status: 'failed' } : prev));
+        }
+      }
+    };
+
+    const timer = setInterval(() => void tick(), 2000);
+    void tick();
+    return () => {
+      cancelled = true;
+      clearInterval(timer);
+    };
+  }, [build?.id, build?.status]);
+
+  const boardAvailable = React.useCallback(
+    (id: FirmwareBoard) => !availableBoards || availableBoards.includes(id),
+    [availableBoards],
+  );
+  // Показываем все платы, но недоступные на сервере помечаем и не даём выбрать.
+  const boards = BOARDS;
+
+  const usbHint = (id: FirmwareBoard): string => {
+    if (id === 'esp32') return 'USB: micro-USB (обычно CP210x). Для прошивки подойдёт и UART-переходник.';
+    if (id === 'esp32s3') return 'USB: нативный USB-OTG — используйте USB-порт, а не UART.';
+    if (id === 'esp32c5') return 'USB: нативный USB-C. Mesh работает в диапазоне 2.4 ГГц.';
+    return 'USB: нативный USB-C, драйвер не нужен.';
+  };
+
+  const go = (next: Step) => {
+    setStep(next);
+    setStepError('');
+  };
+
+  const afterBattery = (): Step => (link !== 'wifi' ? 5 : role === 'gateway' ? 6 : 7);
+  const afterLora = (): Step => (role === 'gateway' ? 6 : 7);
+
+  const next = () => {
+    if (step === 1) return go(2);
+    if (step === 2) return go(3);
+    if (step === 3) {
+      if (!boardAvailable(board)) {
+        setStepError('Эта плата не установлена на сервере сборки — выберите другую.');
+        return;
+      }
+      return go(4);
+    }
+    if (step === 4) {
+      if (batteryPinText.trim() && !(Number.isInteger(batteryPin) && batteryPin >= 0 && batteryPin <= 48)) {
+        setStepError('Пин делителя — число от 0 до 48, или оставьте поле пустым, если батареи нет.');
+        return;
+      }
+      return go(afterBattery());
+    }
+    if (step === 5) return go(afterLora());
+    if (step === 6) {
+      if (!ssid.trim()) {
+        setStepError('Укажите SSID вашего Wi-Fi-роутера — шлюзу нужен интернет.');
+        return;
+      }
+      return go(7);
+    }
+    if (step === 7) {
+      const error = validate();
+      if (error) {
+        setStepError(error);
+        return;
+      }
+      if (build?.status === 'ready') go(8);
+      else if (!build || build.status === 'failed') void startBuild();
+      return;
+    }
+    return undefined;
+  };
+
+  const back = () => {
+    if (step === 7) return go(role === 'gateway' ? 6 : link !== 'wifi' ? 5 : 4);
+    if (step === 6) return go(link !== 'wifi' ? 5 : 4);
+    if (step === 8 || step === 9) return go(7);
+    return go(Math.max(1, step - 1) as Step);
+  };
+
+  const validate = (): string | null => {
+    if (!boardAvailable(board)) return 'Выбранная плата не установлена на сервере сборки. Выберите доступную плату.';
+    if (role === 'gateway' && !ssid.trim()) return 'Укажите SSID Wi-Fi-роутера.';
+    return null;
+  };
+
+  const makeConfig = (): FirmwareConfig => ({
+    board,
+    role,
+    connectivity: link,
+    name: moduleName.trim() || undefined,
+    wifi: role === 'gateway' ? { ssid: ssid.trim(), password } : undefined,
+    // Глобальные mesh-параметры и Hub URL подставляет сервер.
+    lora:
+      link !== 'wifi'
+        ? {
+            chip: loraChip,
+            frequencyMhz: 868,
+            spreadingFactor: 9,
+            bandwidthKhz: 125,
+            syncWord: 0x12,
+            pins: loraPins,
+          }
+        : undefined,
+    battery: {
+      enabled: battery,
+      pin: battery ? batteryPin : 0,
+      ratio: batteryRatio,
+      intervalSec: 900,
+    },
+    ledPin,
+    ota: true,
+  });
+
+  const startBuild = async () => {
+    const error = validate();
+    if (error) {
+      setStepError(error);
+      return;
+    }
+    setBuildError('');
+    setStepError('');
+    setBuilding(true);
+    try {
+      const created = await api.buildFirmware(makeConfig());
+      buildStartedAtRef.current = Date.now();
+      buildErrorCountRef.current = 0;
+      setBuild({
+        id: created.id,
+        status: created.status,
+        progress: created.progress ?? 0,
+        phase: created.phase ?? 'queued',
+      } as FirmwareBuild);
+    } catch (buildFail) {
+      setBuildError(buildFail instanceof Error ? buildFail.message : String(buildFail));
+    } finally {
+      setBuilding(false);
+    }
+  };
+
+  const download = async () => {
+    if (!build?.id) return;
+    try {
+      const url = api.downloadFirmware(build.id);
+      if (Platform.OS === 'web' && typeof document !== 'undefined') {
+        const anchor = document.createElement('a');
+        anchor.href = url;
+        anchor.rel = 'noopener';
+        anchor.target = '_blank';
+        anchor.click();
+      } else {
+        await Linking.openURL(url);
+      }
+    } catch {
+      /* ошибка скачивания не блокирует ручную прошивку */
+    }
+  };
+
+  /** После записи: мягкая привязка и сохранение последнего модуля. */
+  const handleFlashed = async (hardwareId: string) => {
+    let moduleId: string | undefined;
+    let publicId: string | undefined;
+    // Привязка: MAC модуля + UUID владельца (KMesh v1). Чужой модуль — только через передачу с подтверждением.
+    const mac = hardwareId.toLowerCase().replace(/^esp32-/, '').replace(/[^0-9a-f]/g, '');
+    if (mac.length === 12) {
+      try {
+        const claimed = await api.kmeshV1ClaimModule(mac.match(/../g)!.join(':'), moduleName.trim());
+        if (claimed.needsTransfer) setBuildError('Модуль привязан к другому аккаунту — отправлена заявка на передачу.');
+        else if (claimed.bleName) setBoundName(claimed.bleName);
+      } catch {
+        /* привяжем при первом подключении */
+      }
+    }
+    try {
+      const paired = await api.pairModule({
+        hardwareId,
+        role,
+        transport: role === 'wearable' ? 'usb' : link === 'wifi' ? 'wifi' : 'lora',
+        kind: link === 'wifi' ? 'wifi' : 'lora',
+        firmware: build?.version ?? '',
+        battery: undefined,
+        board: makeConfig().board,
+        firmwareConfig: makeConfig(),
+      });
+      if (isPendingTransfer(paired)) {
+        setBuildError('Модуль принадлежит другому пользователю. Заявка на перенос отправлена.');
+        return;
+      }
+      moduleId = paired.id;
+      publicId = paired.publicId;
+      if (role === 'wearable' && paired.id) {
+        await api.attachModule(paired.id, 'usb').catch(() => undefined);
+      }
+    } catch (pairError) {
+      // Прошивка уже записана: не теряем результат, привяжем при подключении.
+      setBuildError(
+        pairError instanceof Error
+          ? `Прошивка записана, но привязка не удалась: ${pairError.message}`
+          : 'Прошивка записана, но привязка не удалась.',
+      );
+    }
+    if (!publicId) {
+      try {
+        const list = await api.listModules();
+        const row = list.find(
+          (item) => (item.hardwareId ?? item.boardUuid ?? item.board_uuid ?? '').toLowerCase() === hardwareId.toLowerCase(),
+        );
+        publicId = row?.publicId;
+        moduleId = moduleId ?? row?.id;
+      } catch {
+        /* сервер может ещё не отдать publicId — покажем подсказку */
+      }
+    }
+    await writeLastModule(kv, {
+      hardwareId,
+      publicId,
+      moduleId,
+      role,
+      kind: 'usb',
+    });
+    setResult({ hardwareId, publicId, moduleId, role });
+    // Сразу показываем ID, не дожидаясь авто-перехода FlashStep.
+    go(9);
+  };
+
+  /** Если API не вернул ID — можно прочитать его из INFO по USB. */
+  const readPublicId = async () => {
+    setReadError('');
+    const info = await moduleConnection.connectUsb();
+    if (!info) {
+      setReadError(moduleConnection.getLastError() ?? moduleConnection.error ?? 'Не удалось прочитать ID модуля.');
+      return;
+    }
+    setResult((prev) => ({
+      hardwareId: info.hardwareId,
+      publicId: info.publicId,
+      moduleId: prev?.moduleId,
+      role: (prev?.role ?? role) as FirmwareRole,
+    }));
+  };
+
+  const linkTitle = link === 'wifi' ? 'ESP-NOW' : link === 'lora' ? 'LoRa' : 'LoRa + ESP-NOW';
+  const summaryRows = [
+    { label: 'Название', value: moduleName.trim() || '—' },
+    { label: 'Тип', value: ROLE_OPTIONS.find((item) => item.id === role)?.title ?? role },
+    { label: 'Интерфейсы', value: linkTitle },
+    { label: 'Плата', value: boardPreset(board).title },
+    { label: 'Батарея', value: battery ? `GPIO ${batteryPin} · делитель ×${batteryRatio}` : 'нет' },
+    ...(link !== 'wifi'
+      ? [
+          { label: 'LoRa', value: loraChip.toUpperCase() },
+          {
+            label: 'Пины LoRa',
+            value: `SCK ${loraPins.sck} MISO ${loraPins.miso} MOSI ${loraPins.mosi} CS ${loraPins.cs} RST ${loraPins.rst} IRQ ${loraPins.dio0}${loraPins.busy !== undefined ? ` BUSY ${loraPins.busy}` : ''}`,
+          },
+        ]
+      : []),
+    ...(role === 'gateway' ? [{ label: 'Роутер', value: ssid.trim() || '—' }] : []),
+  ];
+
+  const stepBody = (() => {
+    switch (step) {
+      case 1:
+        return (
+          <View>
+            <Note icon="hardware-chip-outline" tone="accent">
+              Сначала выберите, чем будет модуль в единой mesh-сети. Это определит прошивку и способ подключения.
+            </Note>
+            {initialRole ? (
+              <>
+                <ChoiceCard
+                  icon={ROLE_OPTIONS.find((item) => item.id === role)?.icon ?? 'hardware-chip-outline'}
+                  title={ROLE_OPTIONS.find((item) => item.id === role)?.title ?? role}
+                  subtitle="роль зафиксирована на предыдущем шаге"
+                  description="При прошивке роль не меняется — вернитесь в мастер подключения, если выбрали её ошибочно."
+                  selected
+                  onPress={() => undefined}
+                />
+                <Note icon="lock-closed-outline" tone="neutral">
+                  Роль уже выбрана в мастере подключения и останется неизменной для этой прошивки.
+                </Note>
+              </>
+            ) : (
+              ROLE_OPTIONS.map((option) => (
+                <ChoiceCard
+                  key={option.id}
+                  icon={option.icon}
+                  title={option.title}
+                  subtitle={option.subtitle}
+                  description={option.description}
+                  selected={role === option.id}
+                  onPress={() => setRole(option.id)}
+                />
+              ))
+            )}
+          </View>
+        );
+      case 2:
+        return (
+          <View>
+            <ChoiceCard
+              icon="git-merge-outline"
+              title="LoRa + ESP-NOW"
+              subtitle="рекомендуется · мост между радиосетями"
+              description="ESP-NOW (Wi-Fi LR) для ближних узлов и LoRa для дальних; модуль пересылает пакеты между ними."
+              selected={link === 'wifi_lora'}
+              onPress={() => setLink('wifi_lora')}
+            />
+            <ChoiceCard
+              icon="wifi-outline"
+              title="ESP-NOW"
+              subtitle="базовый · без LoRa-модуля"
+              description="Связь модулей через ESP-NOW (Wi-Fi LR) на 2.4 ГГц. Дополнительное железо не нужно."
+              selected={link === 'wifi'}
+              onPress={() => setLink('wifi')}
+            />
+            <ChoiceCard
+              icon="radio-outline"
+              title="LoRa"
+              subtitle="максимальная дальность"
+              description="Только LoRa между модулями (BLE для телефона остаётся). Нужен LoRa-модуль и антенна."
+              selected={link === 'lora'}
+              onPress={() => setLink('lora')}
+            />
+          </View>
+        );
+      case 3:
+        return (
+          <View>
+            <Note icon="hardware-chip-outline" tone="neutral">
+              {availableBoards?.length
+                ? 'Серверный сборщик поддерживает не все платы: недоступные помечены и не выбираются. ESP32 Lite и ESP32-S3 подключайте по USB; для Lite может понадобиться драйвер CP210x.'
+                : 'Доступность плат на сервере не определена. ESP32 Lite прошивается по micro-USB (CP210x), ESP32-S3 — по нативному USB-OTG, ESP32-C3 — по USB-C.'}
+            </Note>
+            {boards.map((item) => {
+              const available = boardAvailable(item.id);
+              return (
+                <ChoiceCard
+                  key={item.id}
+                  icon={item.icon}
+                  title={item.title}
+                  subtitle={item.short}
+                  description={`${item.description} ${usbHint(item.id)}`}
+                  selected={board === item.id && available}
+                  right={
+                    available ? undefined : (
+                      <StatusBadge text="не установлена на сервере" tone="warning" />
+                    )
+                  }
+                  onPress={() => {
+                    if (!available) {
+                      setStepError(
+                        `Плата «${item.title}» не установлена на сервере сборки. Выберите другую или установите поддержку на Hub.`,
+                      );
+                      return;
+                    }
+                    setBoard(item.id);
+                    setStepError('');
+                  }}
+                />
+              );
+            })}
+          </View>
+        );
+      case 4:
+        return (
+          <View>
+            <StepCard>
+              <Text style={{ color: theme.textPrimary, fontSize: 14, fontWeight: '700', marginBottom: 4 }}>
+                Название модуля
+              </Text>
+              <SettingsInput
+                label="Название (до 15 символов)"
+                value={moduleName}
+                onChangeText={(text) => setModuleName(text.replace(/["\\]/g, '').slice(0, 15))}
+                placeholder="например, Брелок или Крыша"
+                accessibilityLabel="Название модуля"
+                maxLength={15}
+              />
+              <Text style={{ color: theme.textSecondary, fontSize: 12, lineHeight: 18, marginTop: -4 }}>
+                Видно на карте кластера и в списке модулей. Его можно поменять позже.
+              </Text>
+            </StepCard>
+            <View style={{ height: 10 }} />
+            <StepCard>
+              <Text style={{ color: theme.textPrimary, fontSize: 14, fontWeight: '700', marginBottom: 4 }}>
+                Делитель напряжения батареи
+              </Text>
+              <SettingsInput
+                label="Пин делителя (ADC)"
+                value={batteryPinText}
+                onChangeText={(text) => setBatteryPinText(text.replace(/[^0-9]/g, '').slice(0, 2))}
+                keyboardType="numeric"
+                placeholder="пусто — батареи нет"
+                accessibilityLabel="Пин делителя напряжения"
+                maxLength={2}
+              />
+              <Text style={{ color: theme.textSecondary, fontSize: 12, lineHeight: 18, marginTop: -4 }}>
+                Оставьте пустым, если модуль питается без батареи. Рекомендуемый пин для платы: GPIO{' '}
+                {recommendedBatteryPin(board)}.
+              </Text>
+              {battery ? (
+                <SettingsInput
+                  label="Коэффициент делителя"
+                  value={String(batteryRatio)}
+                  onChangeText={(text) => {
+                    const parsed = Number(text.replace(',', '.').trim());
+                    if (Number.isFinite(parsed) && parsed >= 1 && parsed <= 10) setBatteryRatio(parsed);
+                  }}
+                  keyboardType="numeric"
+                  placeholder="2.0"
+                  accessibilityLabel="Коэффициент делителя батареи"
+                  maxLength={4}
+                />
+              ) : null}
+            </StepCard>
+          </View>
+        );
+      case 5:
+        return (
+          <View>
+            <Note icon="radio-outline" tone="neutral">
+              Выберите LoRa-модуль и укажите, к каким GPIO он подключён. Подставлены рекомендуемые пины платы.
+            </Note>
+            {(
+              [
+                { id: 'sx1262', title: 'SX1262', text: '868/915 МГц · нужен BUSY' },
+                { id: 'sx1278', title: 'SX1278', text: 'Ra-02 · частота сети 868 МГц' },
+                { id: 'sx1276', title: 'SX1276', text: '868/915 МГц · RFM95' },
+                { id: 'lr2021', title: 'LR2021', text: 'новое поколение Semtech · нужен BUSY' },
+              ] as Array<{ id: LoraChip; title: string; text: string }>
+            ).map((chip) => (
+              <ChoiceCard
+                key={chip.id}
+                icon="hardware-chip-outline"
+                title={chip.title}
+                subtitle={chip.text}
+                description=""
+                selected={loraChip === chip.id}
+                onPress={() => setLoraChip(chip.id)}
+              />
+            ))}
+            <StepCard>
+              {(Object.keys(recommendedPins(board)) as Array<keyof LoraPins>)
+                .filter((key) => key !== 'busy' || loraChip === 'sx1262' || loraChip === 'lr2021')
+                .map((key) => (
+                  <SettingsInput
+                    key={key}
+                    label={key === 'dio0' ? 'IRQ (DIO0/DIO1)' : key.toUpperCase()}
+                    value={loraPins[key] === undefined ? '' : String(loraPins[key])}
+                    onChangeText={(text) => {
+                      const trimmed = text.trim();
+                      if (!trimmed) {
+                        setLoraPins((prev) => ({ ...prev, [key]: undefined }));
+                        return;
+                      }
+                      const parsed = Number(trimmed);
+                      if (Number.isInteger(parsed) && parsed >= 0 && parsed <= 48) {
+                        setLoraPins((prev) => ({ ...prev, [key]: parsed }));
+                      }
+                    }}
+                    keyboardType="numeric"
+                    placeholder={`GPIO (реком. ${recommendedPins(board)[key] ?? '—'})`}
+                    accessibilityLabel={`Пин LoRa ${key}`}
+                    maxLength={2}
+                  />
+                ))}
+            </StepCard>
+            <View style={{ height: 10 }} />
+            <Note icon="information-circle-outline" tone="neutral">
+              Частоту и модуляцию LoRa (869.525 МГц, SF9, BW125) задаёт сервер — они общие для всей сети.
+            </Note>
+          </View>
+        );
+      case 6:
+        return (
+          <View>
+            <Note icon="wifi-outline" tone="accent">
+              Шлюзу нужен доступ в интернет. Укажите данные вашего домашнего или офисного Wi-Fi — они попадут только в прошивку.
+            </Note>
+            <SettingsInput
+              label="SSID роутера"
+              value={ssid}
+              onChangeText={(value) => {
+                setSsid(value);
+                if (stepError) setStepError('');
+              }}
+              placeholder="например, HomeWiFi"
+              autoCapitalize="none"
+              maxLength={32}
+              accessibilityLabel="SSID Wi-Fi роутера"
+            />
+            <SettingsInput
+              label="Пароль Wi-Fi"
+              value={password}
+              onChangeText={setPassword}
+              placeholder="пароль роутера"
+              secureTextEntry
+              autoCapitalize="none"
+              maxLength={64}
+              accessibilityLabel="Пароль Wi-Fi роутера"
+            />
+          </View>
+        );
+      case 7:
+        return (
+          <View>
+            <GlassCard>
+              <View style={{ padding: 12, gap: 8 }}>
+                {summaryRows.map((row) => (
+                  <View key={row.label} style={{ flexDirection: 'row', justifyContent: 'space-between', gap: 12 }}>
+                    <Text style={{ color: theme.textSecondary, fontSize: 12 }}>{row.label}</Text>
+                    <Text style={{ color: theme.textPrimary, fontSize: 12.5, fontWeight: '600', flex: 1, textAlign: 'right' }} numberOfLines={1}>
+                      {row.value}
+                    </Text>
+                  </View>
+                ))}
+                <View style={{ height: 1, backgroundColor: theme.line, marginVertical: 3 }} />
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 7 }}>
+                  <Ionicons name="git-network-outline" size={14} color={theme.accent} />
+                  <Text style={{ color: theme.textSecondary, fontSize: 11.5, flex: 1 }}>
+                    {MESH_ALWAYS.networkLine}
+                  </Text>
+                </View>
+              </View>
+            </GlassCard>
+            <View style={{ height: 12 }} />
+            {buildError ? <ErrorText>{buildError}</ErrorText> : null}
+            {build ? (
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 10 }}>
+                <StatusBadge
+                  text={
+                    build.status === 'ready'
+                      ? 'сборка готова'
+                      : build.status === 'failed'
+                        ? 'ошибка сборки'
+                        : build.status === 'building'
+                          ? buildPhaseLabel(build)
+                          : 'в очереди'
+                  }
+                  tone={build.status === 'ready' ? 'success' : build.status === 'failed' ? 'danger' : 'accent'}
+                />
+                {build.version ? <StatusBadge text={`прошивка ${build.version}`} tone="neutral" /> : null}
+              </View>
+            ) : null}
+            {build?.createdAt ? (
+              <Text style={{ color: theme.textSecondary, fontSize: 11.5, marginBottom: 10 }}>
+                Версия {build.version || '—'} · собрана {new Date(build.createdAt).toLocaleString()}
+              </Text>
+            ) : null}
+            {build && (build.status === 'queued' || build.status === 'building') ? (
+              <View style={{ marginBottom: 12 }}>
+                <BuildProgressBar pct={build.progress ?? 0} />
+                <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginTop: 6 }}>
+                  <Text style={{ color: theme.textSecondary, fontSize: 11.5 }}>{buildPhaseLabel(build)}</Text>
+                  <Text style={{ color: theme.textSecondary, fontSize: 11.5 }}>
+                    {Math.round(Math.max(0, Math.min(100, build.progress ?? 0)))}%
+                  </Text>
+                </View>
+              </View>
+            ) : null}
+            <Btn
+              title={
+                build?.status === 'ready'
+                  ? 'Сборка готова'
+                  : build?.status === 'failed'
+                    ? 'Пересобрать'
+                    : build
+                      ? `${buildPhaseLabel(build)}…`
+                      : 'Собрать прошивку'
+              }
+              loading={building || build?.status === 'building' || build?.status === 'queued'}
+              disabled={build?.status === 'ready' || build?.status === 'building' || build?.status === 'queued'}
+              onPress={() => void startBuild()}
+            />
+            {build?.status === 'ready' ? (
+              <Text style={{ color: theme.textDisabled, fontSize: 11.5, marginTop: 8, lineHeight: 17 }}>
+                Нажмите «К прошивке», подключите плату по USB и запишите .bin.
+              </Text>
+            ) : null}
+          </View>
+        );
+      case 8:
+        return (
+          <FlashStep
+            build={build}
+            onDownload={() => void download()}
+            onDone={() => {
+              // Если MAC прочитать не удалось, всё равно показываем итог:
+              // ID можно прочитать по USB отдельной кнопкой.
+              if (!result) setResult({ hardwareId: '', role });
+              go(9);
+            }}
+            onFlashed={handleFlashed}
+          />
+        );
+      case 9:
+        return (
+          <View>
+            <GlassCard>
+              <View style={{ padding: 16, gap: 8 }}>
+                <View style={{ alignItems: 'center', marginBottom: 4 }}>
+                  <View
+                    style={{
+                      width: 58,
+                      height: 58,
+                      borderRadius: 29,
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      backgroundColor: theme.successSoft,
+                      marginBottom: 10,
+                    }}
+                  >
+                    <Ionicons name="checkmark-done" size={30} color={theme.success} />
+                  </View>
+                  <Text style={{ color: theme.textPrimary, fontSize: 18, fontWeight: '800', textAlign: 'center' }}>
+                    Модуль готов
+                  </Text>
+                  <Text style={{ color: theme.textSecondary, fontSize: 12, marginTop: 4, textAlign: 'center' }}>
+                    Привязан к вашему аккаунту по MAC. Передать его можно только с вашим подтверждением.
+                  </Text>
+                </View>
+                {[
+                  { label: 'MAC', value: result?.hardwareId ? result.hardwareId.replace(/^esp32-/, '').toUpperCase() : 'прочитается при подключении' },
+                  ...(boundName ? [{ label: 'BLE-имя', value: boundName }] : []),
+                  { label: 'Прошивка', value: build?.version || '—' },
+                  ...summaryRows.filter((row) => row.label !== 'Роутер'),
+                ].map((row) => (
+                  <View key={row.label} style={{ flexDirection: 'row', justifyContent: 'space-between', gap: 12 }}>
+                    <Text style={{ color: theme.textSecondary, fontSize: 12 }}>{row.label}</Text>
+                    <Text
+                      selectable
+                      style={{ color: theme.textPrimary, fontSize: 12.5, fontWeight: '600', flex: 1, textAlign: 'right' }}
+                    >
+                      {row.value}
+                    </Text>
+                  </View>
+                ))}
+                {!result?.hardwareId ? (
+                  <>
+                    <Btn title="Прочитать MAC по USB" size="s" variant="ghost" onPress={() => void readPublicId()} />
+                    {readError ? <Text style={{ color: theme.danger, fontSize: 11.5 }}>{readError}</Text> : null}
+                  </>
+                ) : null}
+              </View>
+            </GlassCard>
+            {buildError ? (
+              <View style={{ marginTop: 10 }}>
+                <ErrorText>{buildError}</ErrorText>
+              </View>
+            ) : null}
+            <View style={{ height: 12 }} />
+            <Btn
+              title="Готово"
+              disabled={!result}
+              onPress={() => {
+                if (result) onComplete(result);
+              }}
+            />
+          </View>
+        );
+      default:
+        return null;
+    }
+  })();
+
+  const titles: Record<Step, string> = {
+    1: 'Тип модуля',
+    2: 'Интерфейсы',
+    3: 'Плата',
+    4: 'Название и батарея',
+    5: 'LoRa-модуль',
+    6: 'Wi-Fi роутера',
+    7: 'Сборка',
+    8: 'Прошивка по USB',
+    9: 'Готово',
+  };
+
+  const canGoBack = step > 1 && step !== 8;
+
+  return (
+    <View>
+      <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8, paddingHorizontal: 2 }}>
+        <Text style={{ color: theme.textPrimary, fontSize: 13.5, fontWeight: '700' }}>{titles[step]}</Text>
+        <Text style={{ color: theme.textDisabled, fontSize: 11.5 }}>{step <= 7 ? `${step} / 7` : ''}</Text>
+      </View>
+      <View style={{ flexDirection: 'row', gap: 4, marginBottom: 14 }}>
+        {Array.from({ length: 7 }).map((_, index) => {
+          const number = index + 1;
+          const active = step === number;
+          const done = step > number;
+          return (
+            <View
+              key={number}
+              style={{
+                flex: active ? 2.4 : 1,
+                height: 6,
+                borderRadius: 999,
+                backgroundColor: done ? theme.success : active ? theme.accent : theme.line,
+                opacity: done || active ? 1 : 0.55,
+              }}
+            />
+          );
+        })}
+      </View>
+
+      {stepBody}
+
+      {stepError ? (
+        <View style={{ marginTop: 10 }}>
+          <ErrorText>{stepError}</ErrorText>
+        </View>
+      ) : null}
+
+      {step >= 1 && step <= 7 ? (
+        <View style={{ flexDirection: 'row', gap: 8, marginTop: 14 }}>
+          {canGoBack ? (
+            <View style={{ flex: 1 }}>
+              <Btn title="Назад" variant="ghost" onPress={back} />
+            </View>
+          ) : null}
+          <View style={{ flex: 1.4 }}>
+            <Btn
+              title={step === 7 ? (build?.status === 'ready' ? 'К прошивке' : 'Собрать') : 'Далее'}
+              loading={building}
+              onPress={next}
+            />
+          </View>
+        </View>
+      ) : null}
+
+      <View style={{ marginTop: 10 }}>
+        {step === 8 ? (
+          <Text style={{ color: theme.warning, fontSize: 11.5, textAlign: 'center', lineHeight: 17 }}>
+            Идёт прошивка — не закрывайте мастер и не отключайте USB, пока запись не завершится.
+          </Text>
+        ) : (
+          <Btn title="Отмена" size="s" variant="ghost" onPress={onCancel} />
+        )}
+      </View>
+    </View>
+  );
+}

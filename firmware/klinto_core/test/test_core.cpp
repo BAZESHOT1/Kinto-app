@@ -1,0 +1,1628 @@
+/**
+ * Host-тесты портируемого ядра Klinto.
+ * Сборка: firmware/klinto_core/run_tests.ps1
+ */
+#include <stdio.h>
+#include <string.h>
+#include <stdlib.h>
+
+#include "klinto_util.h"
+#include "klinto_config.h"
+#include "klinto_packet.h"
+#include "klinto_codec.h"
+#include "klinto_crypto.h"
+#include "klinto_dedup.h"
+#include "klinto_router.h"
+#include "klinto_flash_queue.h"
+#include "klinto_gateway.h"
+#include "klinto_bridge.h"
+#include "klinto_channel_plan.h"
+#include "klinto_cell.h"
+#include "klinto_ota.h"
+#include "klinto_ota_patcher.h"
+#include "klinto_owner.h"
+
+static int g_failures = 0;
+static int g_checks = 0;
+
+#define CHECK(cond)                                                          \
+  do {                                                                       \
+    ++g_checks;                                                              \
+    if (!(cond)) {                                                           \
+      ++g_failures;                                                          \
+      printf("FAIL %s:%d: %s\n", __FILE__, __LINE__, #cond);                 \
+    }                                                                        \
+  } while (0)
+
+static void hex(const uint8_t *in, size_t len, char *out) {
+  kl_hex_encode(in, len, out, len * 2 + 1, false);
+}
+
+static void test_sha_hmac(void) {
+  uint8_t digest[32];
+  char text[65];
+  kl_sha256("abc", 3, digest);
+  hex(digest, 32, text);
+  CHECK(!strcmp(text, "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"));
+
+  const uint8_t key[20] = {0x0b, 0x0b, 0x0b, 0x0b, 0x0b, 0x0b, 0x0b, 0x0b, 0x0b, 0x0b,
+                           0x0b, 0x0b, 0x0b, 0x0b, 0x0b, 0x0b, 0x0b, 0x0b, 0x0b, 0x0b};
+  const char *data = "Hi There";
+  kl_hmac_sha256(key, sizeof(key), (const uint8_t *)data, strlen(data), digest);
+  hex(digest, 32, text);
+  CHECK(!strcmp(text, "b0344c61d8db38535ca8afceaf0bf12b881dc200c9833da726e9376c2e32cff7"));
+}
+
+static void test_chacha(void) {
+  uint8_t key[32];
+  uint8_t nonce[12] = {0};
+  for (int i = 0; i < 32; ++i) key[i] = (uint8_t)i;
+  nonce[3] = 0x09;
+  nonce[7] = 0x4a;
+  uint8_t zeros[64] = {0};
+  uint8_t out[64];
+  kl_chacha20_xor(key, nonce, 1, zeros, out, sizeof(out));
+  char text[129];
+  hex(out, 64, text);
+  /* RFC 8439 В§2.3.2 keystream block for counter = 1. */
+  CHECK(!strcmp(text,
+                "10f1e7e4d13b5915500fdd1fa32071c4"
+                "c7d1f4c733c068030422aa9ac3d46c4e"
+                "d2826446079faa0914c2d705d98b02a2"
+                "b5129cd1de164eb9cbd083e8a2503c4e"));
+}
+
+static void test_packet(void) {
+  kl_packet_t pkt;
+  kl_packet_init(&pkt, KL_TYPE_DATA, 0x11111111u, 0x22222222u, KL_BROADCAST_ID,
+                 KL_FLAG_NEED_ACK | KL_FLAG_TO_INTERNET);
+  pkt.msg_uuid = 0x0123456789abcdefULL;
+  const char payload[] = "hello";
+  CHECK(kl_packet_set_payload(&pkt, payload, sizeof(payload)));
+  uint8_t wire[KL_MAX_PACKET_SIZE];
+  const size_t n = kl_packet_serialize(&pkt, wire, sizeof(wire));
+  CHECK(n == KL_PACKET_HEADER_SIZE + sizeof(payload) + 2);
+  kl_packet_t parsed;
+  CHECK(kl_packet_parse(wire, n, &parsed));
+  CHECK(parsed.src_id == pkt.src_id);
+  CHECK(parsed.msg_uuid == pkt.msg_uuid);
+  CHECK(parsed.payload_len == sizeof(payload));
+  CHECK(!memcmp(parsed.payload, payload, sizeof(payload)));
+
+  wire[KL_PACKET_HEADER_SIZE] ^= 0x01;
+  CHECK(!kl_packet_parse(wire, n, &parsed));
+
+  kl_packet_header_t h;
+  CHECK(kl_packet_parse_header(wire, n, &h) == false);
+}
+
+static void test_codec(void) {
+  const char *en = "hello, meet me at the station at 8pm";
+  const char *ru = "\xd0\x9f\xd1\x80\xd0\xb8\xd0\xb2\xd0\xb5\xd1\x82, "
+                   "\xd0\xb2\xd1\x81\xd1\x82\xd1\x80\xd0\xb5\xd1\x87\xd0\xb0\xd0\xb5\xd0\xbc\xd1\x81\xd1\x8f "
+                   "\xd0\xb2 8 \xd0\xb2\xd0\xb5\xd1\x87\xd0\xb5\xd1\x80\xd0\xb0";
+  uint8_t buf[KL_MAX_PAYLOAD];
+  for (int round = 0; round < 2; ++round) {
+    const char *text = round == 0 ? en : ru;
+    const size_t len = strlen(text);
+    const size_t n = kl_codec_encode_text(buf, sizeof(buf), 42, text, len, 0);
+    CHECK(n > 0);
+    CHECK(buf[0] == KL_RPC_SEND_TEXT);
+    if (n) {
+      printf("  codec round %d: %u -> %u bytes (compressed=%d)\n", round, (unsigned)len,
+             (unsigned)n, (buf[1] & KL_RPC_FLAG_COMPRESSED) ? 1 : 0);
+    }
+    kl_rpc_text_t out;
+    char decoded[KL_MAX_TEXT + 1];
+    CHECK(kl_codec_decode_text(buf, n, &out, decoded, sizeof(decoded)));
+    CHECK(!strcmp(decoded, text));
+    if (round == 0) CHECK(n < len);
+  }
+
+  uint8_t ack[16];
+  const size_t an = kl_codec_encode_ack(ack, sizeof(ack), 7, 0xDEADBEEF, KL_STATUS_RECEIVED);
+  CHECK(an == 9);
+  CHECK(kl_read_le32(ack + 4) == 0xDEADBEEF);
+  CHECK(ack[8] == KL_STATUS_RECEIVED);
+}
+
+static uint8_t g_key[32];
+static int g_signer_calls = 0;
+
+static bool test_signer(void *ctx, const uint8_t digest[32], uint8_t *sig, size_t *sig_len) {
+  (void)ctx;
+  (void)digest;
+  memset(sig, 0xAB, 64);
+  *sig_len = 64;
+  ++g_signer_calls;
+  return true;
+}
+
+static void test_crypto(void) {
+  for (int i = 0; i < 32; ++i) g_key[i] = (uint8_t)(i * 7 + 1);
+  const char plain[] = "secret mesh message";
+  kl_crypto_aad_t aad;
+  memset(&aad, 0, sizeof(aad));
+  aad.packet_id = 0x10203040;
+  aad.msg_uuid = 0x1122334455667788ULL;
+  aad.src_id = 7;
+  aad.dst_id = 9;
+  aad.type = KL_TYPE_DATA;
+  aad.flags = KL_FLAG_TEMP_MESH_KEY;
+  aad.payload_len = sizeof(plain);
+
+  uint8_t sealed[128];
+  size_t sealed_len = 0;
+  CHECK(kl_crypto_seal(g_key, &aad, (const uint8_t *)plain, sizeof(plain), KL_TEMP_TAG_LEN,
+                       sealed, sizeof(sealed), &sealed_len));
+  CHECK(sealed_len == KL_CRYPTO_HDR_LEN + sizeof(plain) + KL_TEMP_TAG_LEN);
+  uint8_t opened[128];
+  size_t opened_len = 0;
+  CHECK(kl_crypto_open(g_key, sealed, sealed_len, &aad, opened, sizeof(opened), &opened_len));
+  CHECK(opened_len == sizeof(plain));
+  CHECK(!memcmp(opened, plain, sizeof(plain)));
+
+  sealed[sealed_len - 1] ^= 0x80;
+  CHECK(!kl_crypto_open(g_key, sealed, sealed_len, &aad, opened, sizeof(opened), &opened_len));
+  sealed[sealed_len - 1] ^= 0x80;
+
+  /* AAD tampering must fail too. */
+  aad.dst_id = 10;
+  CHECK(!kl_crypto_open(g_key, sealed, sealed_len, &aad, opened, sizeof(opened), &opened_len));
+  aad.dst_id = 9;
+
+  kl_crypto_set_signers(test_signer, NULL, NULL);
+  uint8_t sig[64];
+  size_t sig_len = 0;
+  CHECK(kl_crypto_sign_perm(aad.msg_uuid, 7, 9, 1700000000000ULL, sealed, sealed_len, sig,
+                            &sig_len));
+  CHECK(sig_len == 64);
+  CHECK(g_signer_calls == 1);
+}
+
+static void test_dedup(void) {
+  KlintoDedup d;
+  CHECK(!d.seen_or_add(1, 100, 1000));
+  CHECK(d.seen_or_add(1, 100, 1001));
+  CHECK(!d.seen_or_add(1, 101, 1001));
+  CHECK(!d.seen_or_add(2, 100, 1001));
+  /* Expiry: the same pair is accepted again after the TTL. */
+  CHECK(!d.seen_or_add(1, 100, 1000 + KL_DEDUP_TTL_MS + 5));
+}
+
+/* ---------------------------------------------------------- router -------- */
+
+struct FakeWorld {
+  kl_packet_t sent[64];
+  uint8_t sent_iface[64];
+  uint32_t sent_next[64];
+  int sent_count;
+  int delivered;
+  uint8_t last_status;
+  uint64_t last_status_uuid;
+  int archives;
+};
+
+static bool fake_send(void *ctx, const kl_packet_t *pkt, uint8_t iface, uint32_t next_hop) {
+  FakeWorld *w = (FakeWorld *)ctx;
+  if (w->sent_count >= 64) return false;
+  w->sent[w->sent_count] = *pkt;
+  w->sent_iface[w->sent_count] = iface;
+  w->sent_next[w->sent_count] = next_hop;
+  w->sent_count++;
+  return true;
+}
+
+static void fake_deliver(void *ctx, const kl_packet_t *pkt, int16_t rssi, uint8_t iface) {
+  (void)pkt;
+  (void)rssi;
+  (void)iface;
+  ((FakeWorld *)ctx)->delivered++;
+}
+
+static void fake_status(void *ctx, uint64_t msg_uuid, uint32_t packet_id, uint8_t status) {
+  (void)packet_id;
+  FakeWorld *w = (FakeWorld *)ctx;
+  w->last_status = status;
+  w->last_status_uuid = msg_uuid;
+}
+
+static void fake_archive(void *ctx, const kl_packet_t *pkt) {
+  (void)pkt;
+  ((FakeWorld *)ctx)->archives++;
+}
+
+static void test_router_direct(void) {
+  kl_config_t cfg;
+  kl_config_defaults(&cfg);
+  cfg.node_id = 11;
+  cfg.role = KL_ROLE_CLIENT;
+  cfg.espnow_enabled = true;
+  cfg.lora_present = false;
+
+  FakeWorld world;
+  memset(&world, 0, sizeof(world));
+  kl_router_sink_t sink = {&world, fake_send, fake_deliver, fake_status, fake_archive, NULL, NULL};
+
+  KlintoRouter r;
+  r.init(&cfg, &sink);
+
+  kl_packet_t pkt;
+  kl_packet_init(&pkt, KL_TYPE_DATA, 0, 22, 0, KL_FLAG_NEED_ACK);
+  pkt.msg_uuid = 0xABCDEF;
+  const char body[] = "ping";
+  kl_packet_set_payload(&pkt, body, sizeof(body));
+
+  /* Первая попытка запускает AODV: узел 22 отвечает RREP, после чего
+   * отложенный DATA сразу уходит по найденному маршруту. */
+  CHECK(r.send(&pkt, 1000));
+  kl_packet_t rreq;
+  bool have_rreq = false;
+  for (int i = 0; i < world.sent_count; ++i) {
+    if (world.sent[i].type == KL_TYPE_RREQ) {
+      rreq = world.sent[i];
+      have_rreq = true;
+    }
+  }
+  CHECK(have_rreq);
+
+  FakeWorld world2;
+  memset(&world2, 0, sizeof(world2));
+  kl_config_t cfg2 = cfg;
+  cfg2.node_id = 22;
+  kl_router_sink_t sink2 = {&world2, fake_send, fake_deliver, fake_status, fake_archive, NULL, NULL};
+  KlintoRouter r2;
+  r2.init(&cfg2, &sink2);
+  r2.on_packet(&rreq, KL_IFACE_ESPNOW, -55, 1002);
+  CHECK(world2.sent_count == 1);
+  CHECK(world2.sent[0].type == KL_TYPE_RREP);
+  r.on_packet(&world2.sent[0], KL_IFACE_ESPNOW, -55, 1003);
+
+  /* DATA was flushed to the newly learned route. */
+  kl_packet_t data;
+  bool have_data = false;
+  for (int i = 0; i < world.sent_count; ++i) {
+    if (world.sent[i].type == KL_TYPE_DATA) {
+      data = world.sent[i];
+      have_data = true;
+    }
+  }
+  CHECK(have_data);
+  r2.on_packet(&data, KL_IFACE_ESPNOW, -55, 1005);
+  CHECK(world2.delivered == 1);
+  CHECK(world2.sent_count == 2);
+  CHECK(world2.sent[1].type == KL_TYPE_ACK);
+
+  r.on_packet(&world2.sent[1], KL_IFACE_ESPNOW, -55, 1010);
+  CHECK(world.last_status == KL_STATUS_DELIVERED_TO_PEER);
+  CHECK(world.last_status_uuid == 0xABCDEF);
+}
+
+static void test_router_route_discovery(void) {
+  /* A(1) --- B(2) --- C(3), no route known. A wants C. */
+  kl_config_t cfg;
+  kl_config_defaults(&cfg);
+  cfg.node_id = 11;
+  cfg.role = KL_ROLE_ROUTER;
+
+  FakeWorld wa, wb, wc;
+  memset(&wa, 0, sizeof(wa));
+  memset(&wb, 0, sizeof(wb));
+  memset(&wc, 0, sizeof(wc));
+  kl_router_sink_t sa = {&wa, fake_send, fake_deliver, fake_status, fake_archive, NULL, NULL};
+  kl_router_sink_t sb = {&wb, fake_send, fake_deliver, fake_status, fake_archive, NULL, NULL};
+  kl_router_sink_t sc = {&wc, fake_send, fake_deliver, fake_status, fake_archive, NULL, NULL};
+  KlintoRouter a, b, c;
+  a.init(&cfg, &sa);
+  cfg.node_id = 12;
+  b.init(&cfg, &sb);
+  cfg.node_id = 13;
+  c.init(&cfg, &sc);
+
+  kl_packet_t pkt;
+  kl_packet_init(&pkt, KL_TYPE_DATA, 0, 13, 0, KL_FLAG_NEED_ACK);
+  pkt.msg_uuid = 0x1111;
+  const char body[] = "to c";
+  kl_packet_set_payload(&pkt, body, sizeof(body));
+  a.send(&pkt, 2000);
+
+  /* A emitted an RREQ broadcast. */
+  bool saw_rreq = false;
+  for (int i = 0; i < wa.sent_count; ++i) {
+    if (wa.sent[i].type == KL_TYPE_RREQ) saw_rreq = true;
+  }
+  CHECK(saw_rreq);
+
+  /* B hears RREQ (hop 0), schedules a rebroadcast via RSSI backoff. */
+  kl_packet_t rreq;
+  for (int i = 0; i < wa.sent_count; ++i) {
+    if (wa.sent[i].type == KL_TYPE_RREQ) rreq = wa.sent[i];
+  }
+  b.on_packet(&rreq, KL_IFACE_ESPNOW, -80, 2001);
+  b.tick(2001 + 200);
+  bool relayed = false;
+  for (int i = 0; i < wb.sent_count; ++i) {
+    if (wb.sent[i].type == KL_TYPE_RREQ) relayed = true;
+  }
+  CHECK(relayed);
+
+  /* C hears the relayed RREQ, answers with RREP. */
+  kl_packet_t relayed_req;
+  for (int i = 0; i < wb.sent_count; ++i) {
+    if (wb.sent[i].type == KL_TYPE_RREQ) relayed_req = wb.sent[i];
+  }
+  c.on_packet(&relayed_req, KL_IFACE_ESPNOW, -70, 2020);
+  bool rrep = false;
+  for (int i = 0; i < wc.sent_count; ++i) {
+    if (wc.sent[i].type == KL_TYPE_RREP) rrep = true;
+  }
+  CHECK(rrep);
+
+  /* B forwards the RREP to A, A learns the route and flushes the pending data. */
+  kl_packet_t reply;
+  for (int i = 0; i < wc.sent_count; ++i) {
+    if (wc.sent[i].type == KL_TYPE_RREP) reply = wc.sent[i];
+  }
+  b.on_packet(&reply, KL_IFACE_ESPNOW, -70, 2030);
+  for (int i = 0; i < wb.sent_count; ++i) {
+  }
+  for (int i = 0; i < wb.sent_count; ++i) {
+    if (wb.sent[i].type == KL_TYPE_RREP) reply = wb.sent[i];
+  }
+  a.on_packet(&reply, KL_IFACE_ESPNOW, -70, 2040);
+
+  const kl_route_entry_t *route = a.route(13);
+  CHECK(route != NULL);
+  if (route) {
+    CHECK(route->next_hop_id == 12);
+    CHECK(route->hops == 2);
+  }
+  bool data_sent = false;
+  kl_packet_t data_from_a;
+  for (int i = 0; i < wa.sent_count; ++i) {
+    if (wa.sent[i].type == KL_TYPE_DATA && wa.sent[i].dst_id == 13) {
+      data_sent = true;
+      data_from_a = wa.sent[i];
+    }
+  }
+  CHECK(data_sent);
+
+  /* End-to-end ACK через два прыжка C -> B -> A. Именно для этого нужен
+   * last_hop_id: иначе ретранслированный DATA в LoRa не найдёт обратный путь. */
+  b.on_packet(&data_from_a, KL_IFACE_ESPNOW, -70, 2050);
+  kl_packet_t data_from_b;
+  bool b_forwarded = false;
+  for (int i = 0; i < wb.sent_count; ++i) {
+    if (wb.sent[i].type == KL_TYPE_DATA && wb.sent[i].dst_id == 13) {
+      b_forwarded = true;
+      data_from_b = wb.sent[i];
+    }
+  }
+  CHECK(b_forwarded);
+  c.on_packet(&data_from_b, KL_IFACE_ESPNOW, -72, 2060);
+  CHECK(wc.delivered == 1);
+
+  kl_packet_t ack_from_c;
+  bool c_acked = false;
+  for (int i = 0; i < wc.sent_count; ++i) {
+    if (wc.sent[i].type == KL_TYPE_ACK && wc.sent[i].dst_id == 11) {
+      c_acked = true;
+      ack_from_c = wc.sent[i];
+    }
+  }
+  CHECK(c_acked);
+  CHECK(ack_from_c.next_hop_id == 12);
+  b.on_packet(&ack_from_c, KL_IFACE_ESPNOW, -70, 2070);
+  kl_packet_t ack_from_b;
+  bool b_forwarded_ack = false;
+  for (int i = 0; i < wb.sent_count; ++i) {
+    if (wb.sent[i].type == KL_TYPE_ACK && wb.sent[i].dst_id == 11) {
+      b_forwarded_ack = true;
+      ack_from_b = wb.sent[i];
+    }
+  }
+  CHECK(b_forwarded_ack);
+  CHECK(ack_from_b.next_hop_id == 11);
+  a.on_packet(&ack_from_b, KL_IFACE_ESPNOW, -70, 2080);
+  CHECK(wa.last_status == KL_STATUS_DELIVERED_TO_PEER);
+}
+
+static void test_gateway_gradient(void) {
+  kl_config_t gwcfg;
+  kl_config_defaults(&gwcfg);
+  gwcfg.node_id = 100;
+  gwcfg.role = KL_ROLE_GATEWAY;
+
+  FakeWorld wg, wr, wc;
+  memset(&wg, 0, sizeof(wg));
+  memset(&wr, 0, sizeof(wr));
+  memset(&wc, 0, sizeof(wc));
+  kl_router_sink_t sg = {&wg, fake_send, fake_deliver, fake_status, fake_archive, NULL, NULL};
+  kl_router_sink_t sr = {&wr, fake_send, fake_deliver, fake_status, fake_archive, NULL, NULL};
+  kl_router_sink_t sc = {&wc, fake_send, fake_deliver, fake_status, fake_archive, NULL, NULL};
+  KlintoRouter g, r, c;
+  g.init(&gwcfg, &sg);
+
+  kl_config_t rcfg = gwcfg;
+  rcfg.node_id = 50;
+  rcfg.role = KL_ROLE_ROUTER;
+  r.init(&rcfg, &sr);
+
+  kl_config_t ccfg = gwcfg;
+  ccfg.node_id = 7;
+  ccfg.role = KL_ROLE_CLIENT;
+  c.init(&ccfg, &sc);
+
+  g.emit_gateway_beacon(3000);
+  kl_packet_t beacon;
+  for (int i = 0; i < wg.sent_count; ++i) {
+    if (wg.sent[i].type == KL_TYPE_GW_BEACON) beacon = wg.sent[i];
+  }
+  r.on_packet(&beacon, KL_IFACE_ESPNOW, -50, 3001);
+  CHECK(r.gateway_route()->valid);
+  CHECK(r.gateway_route()->hops == 0);
+  CHECK(r.gateway_route()->next_hop_id == 100);
+
+  r.tick(3001 + 200);  // RSSI -50 -> long backoff
+  kl_packet_t relayed_beacon;
+  bool relayed = false;
+  for (int i = 0; i < wr.sent_count; ++i) {
+    if (wr.sent[i].type == KL_TYPE_GW_BEACON) {
+      relayed = true;
+      relayed_beacon = wr.sent[i];
+    }
+  }
+  CHECK(relayed);
+  CHECK(relayed_beacon.hop_count == 1);
+
+  c.on_packet(&relayed_beacon, KL_IFACE_ESPNOW, -75, 3250);
+  CHECK(c.gateway_route()->valid);
+  CHECK(c.gateway_route()->hops == 1);
+  CHECK(c.gateway_route()->next_hop_id == 50);
+
+  /* Client sends an uplink message; it must go to its gateway next hop. */
+  kl_packet_t up;
+  kl_packet_init(&up, KL_TYPE_DATA, 0, KL_ANY_GATEWAY_ID, 0,
+                 KL_FLAG_TO_INTERNET | KL_FLAG_NEED_ACK | KL_FLAG_NEED_CLOUD_ARCHIVE);
+  up.msg_uuid = 0x777;
+  kl_packet_set_payload(&up, "up", 2);
+  int before = wc.sent_count;
+  c.send(&up, 3300);
+  CHECK(wc.sent_count > before);
+  CHECK(wc.sent_next[before] == 50);
+  CHECK(wc.sent[before].dst_id == KL_ANY_GATEWAY_ID);
+
+  /* Gateway archives a message it overhears even when addressed to a peer. */
+  kl_packet_t overheard;
+  kl_packet_init(&overheard, KL_TYPE_DATA, 7, 8, KL_BROADCAST_ID,
+                 KL_FLAG_NEED_CLOUD_ARCHIVE);
+  overheard.msg_uuid = 0x888;
+  kl_packet_set_payload(&overheard, "x", 1);
+  g.on_packet(&overheard, KL_IFACE_ESPNOW, -60, 3400);
+  CHECK(wg.archives == 1);
+}
+
+/* ------------------------------------------------------- flash queue ----- */
+
+struct MemStorage {
+  uint8_t data[40000];
+  uint32_t len;
+};
+
+static bool mem_read(void *ctx, uint32_t off, void *buf, size_t len) {
+  MemStorage *m = (MemStorage *)ctx;
+  if (off + len > sizeof(m->data)) return false;
+  memcpy(buf, m->data + off, len);
+  return true;
+}
+static bool mem_write(void *ctx, uint32_t off, const void *buf, size_t len) {
+  MemStorage *m = (MemStorage *)ctx;
+  if (off + len > sizeof(m->data)) return false;
+  memcpy(m->data + off, buf, len);
+  if (off + len > m->len) m->len = off + (uint32_t)len;
+  return true;
+}
+static bool mem_size(void *ctx, uint32_t *out) {
+  *out = ((MemStorage *)ctx)->len;
+  return true;
+}
+static bool mem_truncate(void *ctx, uint32_t size) {
+  MemStorage *m = (MemStorage *)ctx;
+  if (size > sizeof(m->data)) return false;
+  if (size > m->len) memset(m->data + m->len, 0, size - m->len);
+  m->len = size;
+  return true;
+}
+
+static void test_flash_queue(void) {
+  static MemStorage storage;
+  memset(&storage, 0, sizeof(storage));
+  kl_storage_ops_t ops = {&storage, mem_read, mem_write, mem_size, mem_truncate};
+  KlintoFlashQueue q;
+  CHECK(q.init(&ops));
+  CHECK(q.empty());
+
+  for (int i = 0; i < KL_FLASH_SLOTS + 5; ++i) {
+    kl_packet_t pkt;
+    kl_packet_init(&pkt, KL_TYPE_DATA, 11, 22, KL_BROADCAST_ID, 0);
+    pkt.msg_uuid = (uint64_t)(i + 1);
+    uint8_t body[4];
+    kl_write_le32(body, (uint32_t)i);
+    kl_packet_set_payload(&pkt, body, sizeof(body));
+    CHECK(q.push(&pkt));
+  }
+  CHECK(q.count() == KL_FLASH_SLOTS);
+
+  kl_packet_t out;
+  CHECK(q.peek(&out));
+  /* Oldest surviving record is i = 5. */
+  CHECK(kl_read_le32(out.payload) == 5);
+  int seen = 0;
+  while (q.pop(&out)) {
+    if (seen == 0) CHECK(kl_read_le32(out.payload) == 5);
+    ++seen;
+  }
+  CHECK(seen == KL_FLASH_SLOTS);
+  CHECK(q.empty());
+
+  /* Re-open: the header must survive. */
+  KlintoFlashQueue q2;
+  CHECK(q2.init(&ops));
+  CHECK(q2.empty());
+}
+
+/* ------------------------------------------------------- bridge E2E ------ */
+
+struct FakeLink : public IClientLink {
+  uint8_t out[8192];
+  size_t out_len;
+  bool conn;
+  uint16_t m;
+  kl_rx_callback_t cb;
+  void *cb_ctx;
+  FakeLink() : out_len(0), conn(true), m(250), cb(nullptr), cb_ctx(nullptr) {
+    memset(out, 0, sizeof(out));
+  }
+  bool send(const uint8_t *data, size_t len) override {
+    if (!conn || out_len + len > sizeof(out)) return false;
+    memcpy(out + out_len, data, len);
+    out_len += len;
+    return true;
+  }
+  bool connected() const override { return conn; }
+  uint16_t mtu() const override { return m; }
+  void poll(uint32_t) override {}
+  void setReceiveCallback(kl_rx_callback_t c, void *ctx) override {
+    cb = c;
+    cb_ctx = ctx;
+  }
+  const char *name() const override { return "TEST"; }
+};
+
+struct BridgeCtx {
+  KlintoClientBridge *bridge;
+  uint8_t last_status;
+  uint64_t last_uuid;
+  int frames;
+};
+
+static size_t build_client_frame(uint8_t *out, uint8_t type, const uint8_t *payload, size_t len) {
+  out[0] = KL_CLIENT_MAGIC0;
+  out[1] = KL_CLIENT_MAGIC1;
+  out[2] = KL_CLIENT_VERSION;
+  out[3] = type;
+  out[4] = 0;
+  kl_write_le16(out + 5, 1);
+  kl_write_le16(out + 7, (uint16_t)len);
+  memcpy(out + KL_CLIENT_HEADER_SIZE, payload, len);
+  const uint16_t crc = kl_crc16(out + 2, KL_CLIENT_HEADER_SIZE - 2 + len, 0xFFFF);
+  kl_write_le16(out + KL_CLIENT_HEADER_SIZE + len, crc);
+  return KL_CLIENT_HEADER_SIZE + len + 2;
+}
+
+struct BridgeWorld {
+  FakeWorld world;
+  BridgeCtx bridge_ctx;
+};
+
+static bool bw_send(void *ctx, const kl_packet_t *pkt, uint8_t iface, uint32_t next_hop) {
+  return fake_send(&((BridgeWorld *)ctx)->world, pkt, iface, next_hop);
+}
+static void bw_deliver(void *ctx, const kl_packet_t *pkt, int16_t rssi, uint8_t iface) {
+  BridgeWorld *w = (BridgeWorld *)ctx;
+  fake_deliver(&w->world, pkt, rssi, iface);
+  if (w->bridge_ctx.bridge) w->bridge_ctx.bridge->deliver_mesh(pkt);
+}
+static void bw_status(void *ctx, uint64_t uuid, uint32_t pid, uint8_t status) {
+  BridgeWorld *w = (BridgeWorld *)ctx;
+  w->bridge_ctx.last_status = status;
+  w->bridge_ctx.last_uuid = uuid;
+  w->bridge_ctx.frames++;
+  if (w->bridge_ctx.bridge) w->bridge_ctx.bridge->status(uuid, pid, status);
+}
+static void bw_archive(void *ctx, const kl_packet_t *pkt) {
+  fake_archive(&((BridgeWorld *)ctx)->world, pkt);
+}
+
+static void test_bridge_e2e(void) {
+  kl_config_t cfg;
+  kl_config_defaults(&cfg);
+  cfg.node_id = 11;
+  cfg.role = KL_ROLE_CLIENT;
+  for (int i = 0; i < 32; ++i) cfg.temp_mesh_key[i] = (uint8_t)(0x40 + i);
+  cfg.has_temp_key = true;
+
+  BridgeWorld bwa, bwb;
+  memset(&bwa, 0, sizeof(bwa));
+  memset(&bwb, 0, sizeof(bwb));
+  kl_router_sink_t sa = {&bwa, bw_send, bw_deliver, bw_status, bw_archive, NULL, NULL};
+  kl_router_sink_t sb = {&bwb, bw_send, bw_deliver, bw_status, bw_archive, NULL, NULL};
+
+  KlintoRouter ra, rb;
+  FakeLink la, lb;
+  KlintoFlashQueue qa, qb;
+  ra.init(&cfg, &sa);
+  ra.seed_route(22, 22, KL_IFACE_ESPNOW, 1, -50, 5000);
+
+  kl_config_t cfg2 = cfg;
+  cfg2.node_id = 22;
+  rb.init(&cfg2, &sb);
+
+  KlintoClientBridge ba, bb;
+  kl_bridge_sink_t sink = {nullptr, nullptr, nullptr, nullptr, nullptr, nullptr};
+  ba.init(&ra, &cfg, &la, &qa, &sink);
+  bb.init(&rb, &cfg2, &lb, &qb, &sink);
+  bwa.bridge_ctx.bridge = &ba;
+  bwb.bridge_ctx.bridge = &bb;
+
+  const char *text = "hello from the phone";
+  uint8_t rpc[64];
+  const size_t rpc_len = kl_codec_encode_text(rpc, sizeof(rpc), 7, text, strlen(text), 0);
+  uint8_t up[128];
+  kl_write_le32(up, 22);
+  up[4] = 0;
+  kl_write_le64(up + 5, 0x123456789ULL);
+  memcpy(up + KL_CLIENT_UP_HEADER, rpc, rpc_len);
+  const size_t up_len = KL_CLIENT_UP_HEADER + rpc_len;
+
+  uint8_t frame[256];
+  const size_t frame_len = build_client_frame(frame, KL_CF_RPC_UP, up, up_len);
+  ba.on_link_data(frame, frame_len);
+
+  /* Router A should now hold an encrypted DATA frame for node 22. */
+  kl_packet_t data;
+  bool have = false;
+  for (int i = 0; i < bwa.world.sent_count; ++i) {
+    if (bwa.world.sent[i].type == KL_TYPE_DATA) {
+      data = bwa.world.sent[i];
+      have = true;
+    }
+  }
+  CHECK(have);
+  CHECK(data.flags & KL_FLAG_TEMP_MESH_KEY);
+  CHECK(kl_crypto_is_envelope(data.payload, data.payload_len));
+
+  /* Node 22 decrypts and forwards a transparent RPC to its app. */
+  rb.on_packet(&data, KL_IFACE_ESPNOW, -55, 5010);
+  CHECK(lb.out_len > 0);
+  CHECK(lb.out[3] == KL_CF_RPC_DOWN);
+  const uint16_t plen = (uint16_t)(lb.out[7] | ((uint16_t)lb.out[8] << 8));
+  kl_packet_t down;
+  CHECK(kl_packet_parse(lb.out + KL_CLIENT_HEADER_SIZE, plen, &down));
+  CHECK(!(down.flags & KL_FLAG_TEMP_MESH_KEY));
+  kl_rpc_text_t rpc_out;
+  char decoded[KL_MAX_TEXT + 1];
+  CHECK(kl_codec_decode_text(down.payload, down.payload_len, &rpc_out, decoded, sizeof(decoded)));
+  CHECK(!strcmp(decoded, text));
+
+  /* Router B emitted an L3 ACK; feed it back to A and expect DELIVERED. */
+  CHECK(bwb.world.sent_count >= 1);
+  ra.on_packet(&bwb.world.sent[0], KL_IFACE_ESPNOW, -55, 5020);
+  CHECK(bwa.bridge_ctx.last_status == KL_STATUS_DELIVERED_TO_PEER);
+  CHECK(bwa.bridge_ctx.last_uuid == 0x123456789ULL);
+}
+
+/* ---------------------------------------------------------- gateway ----- */
+
+struct FakeTransport : public IGatewayTransport {
+  char up[1024];
+  size_t up_len;
+  uint8_t down[KL_MAX_PACKET_SIZE];
+  size_t down_len;
+  bool conn;
+  FakeTransport() : up_len(0), down_len(0), conn(true) { memset(up, 0, sizeof(up)); }
+  bool connect() override {
+    conn = true;
+    return true;
+  }
+  void disconnect() override { conn = false; }
+  bool connected() const override { return conn; }
+  bool publish(const char *topic, const uint8_t *data, size_t len) override {
+    (void)topic;
+    if (!conn || len >= sizeof(up)) return false;
+    memcpy(up, data, len);
+    up[len] = '\0';
+    up_len = len;
+    return true;
+  }
+  int read(char *topic, size_t tcap, uint8_t *data, size_t dcap) override {
+    if (!down_len) return 0;
+    if (down_len > dcap || tcap < 8) return -1;
+    memcpy(topic, "down", 5);
+    memcpy(data, down, down_len);
+    const int n = (int)down_len;
+    down_len = 0;
+    return n;
+  }
+  void loop() override {}
+};
+
+struct GatewayCtx {
+  int injected;
+  kl_packet_t last;
+};
+
+static bool gw_inject(void *ctx, const kl_packet_t *pkt) {
+  GatewayCtx *c = (GatewayCtx *)ctx;
+  c->last = *pkt;
+  c->injected++;
+  return true;
+}
+
+static void test_gateway(void) {
+  kl_config_t cfg;
+  kl_config_defaults(&cfg);
+  cfg.node_id = 100;
+  cfg.role = KL_ROLE_GATEWAY;
+  cfg.gateway_id = 100;
+
+  FakeTransport t;
+  KlintoFlashQueue q;
+  GatewayCtx ctx = {0, {}};
+  kl_gateway_sink_t sink = {&ctx, gw_inject, nullptr};
+  KlintoGateway gw;
+  gw.init(&cfg, &t, &q, &sink);
+
+  kl_packet_t pkt;
+  kl_packet_init(&pkt, KL_TYPE_DATA, 7, 8, KL_BROADCAST_ID, KL_FLAG_NEED_CLOUD_ARCHIVE);
+  pkt.msg_uuid = 0x0102030405060708ULL;
+  kl_packet_set_payload(&pkt, "abc", 3);
+  CHECK(gw.publish_archive(&pkt, -70, KL_IFACE_LORA, 6000));
+  CHECK(t.up_len > 0);
+  CHECK(strstr(t.up, "\"kind\":\"mesh_archive\"") != nullptr);
+  CHECK(strstr(t.up, "\"msg_uuid\":\"0102030405060708\"") != nullptr);
+  CHECK(strstr(t.up, "\"packet_b64\":\"") != nullptr);
+
+  /* Downlink: server sends a raw MeshPacket on the down topic. */
+  kl_packet_t down;
+  kl_packet_init(&down, KL_TYPE_DATA, 8, 7, KL_BROADCAST_ID, 0);
+  down.msg_uuid = 0x99;
+  kl_packet_set_payload(&down, "dl", 3);
+  t.down_len = kl_packet_serialize(&down, t.down, sizeof(t.down));
+  gw.loop(6100);
+  CHECK(ctx.injected == 1);
+  CHECK(ctx.last.flags & KL_FLAG_FROM_INTERNET);
+  CHECK(ctx.last.msg_uuid == 0x99);
+}
+
+/* ------------------------------------------------------ channel plan ----- */
+
+static void test_channel_plan(void) {
+  for (uint8_t band = KL_BAND_433; band <= KL_BAND_868; ++band) {
+    uint32_t prev = 0;
+    for (uint8_t ch = 1; ch <= KL_CHANNEL_COUNT; ++ch) {
+      const kl_channel_plan_entry_t *e = kl_channel_plan_entry(ch, band);
+      CHECK(e != NULL);
+      if (!e) continue;
+      CHECK(e->wifi_channel == ch);
+      CHECK(e->lora_bw_khz == 125);
+      CHECK(e->lora_sync_word == (uint8_t)(0x10 + ch));
+      if (prev) CHECK(e->lora_freq_hz - prev >= e->lora_bw_khz * 1000u);
+      prev = e->lora_freq_hz;
+    }
+  }
+  for (uint8_t ch = 1; ch <= KL_CHANNEL_COUNT; ++ch) {
+    const kl_channel_plan_entry_t *a = kl_channel_plan_entry(ch, KL_BAND_868);
+    for (uint8_t other = (uint8_t)(ch + 1); other <= KL_CHANNEL_COUNT; ++other) {
+      const kl_channel_plan_entry_t *b = kl_channel_plan_entry(other, KL_BAND_868);
+      CHECK(a->lora_freq_hz != b->lora_freq_hz);
+      CHECK(a->lora_sync_word != b->lora_sync_word);
+    }
+  }
+  kl_config_t cfg;
+  kl_config_defaults(&cfg);
+  cfg.lora.freq_mhz = 869.525f;
+  CHECK(kl_channel_plan_apply(&cfg, 5));
+  CHECK(cfg.wifi_channel == 5);
+  CHECK(cfg.lora.freq_mhz > 868.0f);
+  CHECK(kl_channel_plan_nearest(cfg.lora.freq_mhz) == 5);
+  CHECK(!kl_channel_plan_apply(&cfg, 0));
+  CHECK(!kl_channel_plan_apply(&cfg, 14));
+}
+
+/* ----------------------------------------------------------- cell -------- */
+
+struct CellHostState {
+  uint8_t applied;
+  uint8_t locked_channel;
+  uint32_t locked_gateway;
+  uint8_t offline_channel;
+  int locked;
+  int offline;
+  int probes;
+};
+
+static bool cell_apply(void *ctx, uint8_t channel) {
+  ((CellHostState *)ctx)->applied = channel;
+  return true;
+}
+static void cell_locked(void *ctx, uint8_t channel, uint32_t gateway_id, int16_t rssi,
+                        uint8_t hops, uint8_t reason) {
+  (void)rssi;
+  (void)hops;
+  (void)reason;
+  CellHostState *s = (CellHostState *)ctx;
+  s->locked_channel = channel;
+  s->locked_gateway = gateway_id;
+  s->locked++;
+}
+static void cell_probe(void *ctx) {
+  CellHostState *s = (CellHostState *)ctx;
+  s->probes++;
+}
+static void cell_offline(void *ctx, uint8_t channel) {
+  CellHostState *s = (CellHostState *)ctx;
+  s->offline_channel = channel;
+  s->offline++;
+}
+
+static void test_cell_manager(void) {
+  kl_config_t cfg;
+  kl_config_defaults(&cfg);
+  cfg.role = KL_ROLE_CLIENT;
+  cfg.wifi_channel = 1;
+  cfg.lora.freq_mhz = 869.525f;
+
+  CellHostState host;
+  memset(&host, 0, sizeof(host));
+  kl_cell_host_t callbacks = {&host, cell_apply, cell_locked, cell_offline, cell_probe};
+  KlintoCellManager cell;
+  cell.init(&cfg, &callbacks);
+
+  cell.start_scan(0, KL_SCAN_BOOT);
+  CHECK(cell.scanning());
+  CHECK(cell.scan_channel() == 1);
+
+  /* Шлюз сидит на канале 3: маяк слышен только там (в ответ на пробу).
+   * Модуль фиксируется сразу, не дожидаясь конца обхода всех каналов. */
+  host.probes = 0;
+  uint32_t t = 0;
+  for (int step = 0; step < 40 && cell.scanning(); ++step) {
+    t += 90;
+    cell.tick(t);
+    if (cell.scan_channel() == 3) cell.on_beacon(2003u, 1, -55, t);
+  }
+  cell.tick(t + 10);
+  CHECK(cell.state() == KL_CELL_LOCKED);
+  CHECK(cell.channel() == 3);
+  CHECK(host.locked == 1);
+  CHECK(host.locked_channel == 3);
+  CHECK(host.locked_gateway == 2003u);
+  CHECK(host.probes >= 2); /* на каждом канале уходят пробы GW_PROBE */
+
+  /* Слабый сигнал не уводит модуль с канала кластера: связь есть. */
+  cell.on_beacon(2003u, 1, -95, 6000);
+  cell.on_beacon(2003u, 1, -96, 6001);
+  CHECK(!cell.scanning());
+  CHECK(cell.channel() == 3);
+
+  /* Маяки пропали: 3 пробы по 2 с на том же канале, без смены канала. */
+  const int probes_before = host.probes;
+  cell.tick(6001 + 12000);
+  CHECK(!cell.scanning());
+  CHECK(cell.channel() == 3);
+  cell.tick(6001 + 14000);
+  CHECK(host.probes > probes_before);
+  /* Шлюз ответил на пробу на том же канале — остаёмся. */
+  cell.on_beacon(2003u, 1, -60, 6001 + 15000);
+  cell.tick(6001 + 20000);
+  CHECK(!cell.scanning());
+  CHECK(cell.channel() == 3);
+
+  /* Шлюз пропал совсем: после 6 с на прежнем канале начинается поиск. */
+  cell.tick(6001 + 15000 + 12000);
+  cell.tick(6001 + 15000 + 12000 + 6500);
+  CHECK(cell.scanning());
+
+  t = 6001 + 15000 + 12000 + 6500;
+  for (int step = 0; step < 60 && cell.scanning(); ++step) {
+    t += 90;
+    cell.tick(t);
+    if (cell.scan_channel() == 7) cell.on_beacon(3007u, 1, -60, t);
+  }
+  cell.tick(t + 10);
+  CHECK(cell.state() == KL_CELL_LOCKED);
+  CHECK(cell.channel() == 7);
+  CHECK(host.locked_channel == 7);
+
+  /* Ни одного шлюза: после двух полных циклов — аварийный канал 1. */
+  KlintoCellManager offline;
+  CellHostState off_host;
+  memset(&off_host, 0, sizeof(off_host));
+  kl_cell_host_t off_cb = {&off_host, cell_apply, cell_locked, cell_offline, cell_probe};
+  offline.init(&cfg, &off_cb);
+  offline.start_scan(0, KL_SCAN_BOOT);
+  uint32_t now = 0;
+  for (int i = 0; i < 3 * KL_CHANNEL_COUNT + 6; ++i) {
+    now += 450;
+    offline.tick(now);
+  }
+  CHECK(offline.state() == KL_CELL_OFFLINE);
+  CHECK(offline.channel() == KL_FALLBACK_OFFLINE_CHANNEL);
+  CHECK(off_host.offline >= 1);
+  CHECK(off_host.offline_channel == KL_FALLBACK_OFFLINE_CHANNEL);
+
+  /* Шлюз не сканирует: канал фиксируется по Wi-Fi AP. */
+  kl_config_t gw_cfg = cfg;
+  gw_cfg.role = KL_ROLE_GATEWAY;
+  CellHostState gw_host;
+  memset(&gw_host, 0, sizeof(gw_host));
+  kl_cell_host_t gw_cb = {&gw_host, cell_apply, cell_locked, cell_offline, cell_probe};
+  KlintoCellManager gw;
+  gw.init(&gw_cfg, &gw_cb);
+  gw.lock_gateway(9, 100);
+  gw.tick(999999);
+  CHECK(gw.state() == KL_CELL_LOCKED);
+  CHECK(gw.channel() == 9);
+  CHECK(gw_host.applied == 9);
+
+  /* Маяк несёт wifi_channel: модуль переезжает на канал шлюза (12),
+   * даже если скан начался с канала 1. */
+  KlintoCellManager adv;
+  CellHostState adv_host;
+  memset(&adv_host, 0, sizeof(adv_host));
+  kl_cell_host_t adv_cb = {&adv_host, cell_apply, cell_locked, cell_offline};
+  adv.init(&cfg, &adv_cb);
+  adv.start_scan(0, KL_SCAN_BOOT);
+  adv.on_beacon(4040u, 1, -48, 10, 12);
+  for (int i = 0; i < KL_CHANNEL_COUNT + 1; ++i) adv.tick((uint32_t)(i + 1) * 120u);
+  CHECK(adv.state() == KL_CELL_LOCKED);
+  CHECK(adv.channel() == 12);
+  CHECK(adv_host.applied == 12);
+
+  /* Здоровая сота не пересканируется каждые 2.5 минуты. */
+  adv.tick(1680u + 10000u);
+  CHECK(adv.state() == KL_CELL_LOCKED);
+  CHECK(adv.channel() == 12);
+}
+
+/* --------------------------------------------------- сервисные RPC ------- */
+
+static void test_rpc_services(void) {
+  uint8_t buf[KL_MAX_PAYLOAD];
+  kl_search_request_t sreq;
+  sreq.req_id = 4242;
+  sreq.search_type = KL_SEARCH_USERS;
+  strcpy(sreq.query, "алиса");
+  size_t n = kl_codec_encode_search_req(buf, sizeof(buf), 7, &sreq);
+  CHECK(n > 0);
+  uint16_t chat = 0;
+  kl_search_request_t sout;
+  CHECK(kl_codec_decode_search_req(buf, n, &chat, &sout));
+  CHECK(chat == 7);
+  CHECK(sout.req_id == 4242);
+  CHECK(!strcmp(sout.query, "алиса"));
+
+  kl_search_result_t results[2];
+  results[0].entity_id = 1001;
+  results[0].entity_type = KL_SEARCH_USERS;
+  strcpy(results[0].name, "alice");
+  results[1].entity_id = 1002;
+  results[1].entity_type = KL_SEARCH_CHANNELS;
+  strcpy(results[1].name, "новости");
+  n = kl_codec_encode_search_resp(buf, sizeof(buf), 7, 4242, results, 2, false);
+  CHECK(n > 0);
+  kl_search_result_t decoded[KL_SEARCH_MAX_RESULTS];
+  uint16_t req = 0;
+  uint8_t count = 0;
+  bool more = true;
+  CHECK(kl_codec_decode_search_resp(buf, n, &chat, &req, decoded, KL_SEARCH_MAX_RESULTS, &count,
+                                    &more));
+  CHECK(req == 4242);
+  CHECK(count == 2);
+  CHECK(!more);
+  CHECK(!strcmp(decoded[1].name, "новости"));
+
+  n = kl_codec_encode_feed_req(buf, sizeof(buf), 0xFFFF, 1700000000u);
+  uint32_t ts = 0;
+  CHECK(kl_codec_decode_feed_req(buf, n, &chat, &ts));
+  CHECK(ts == 1700000000u);
+
+  kl_feed_entry_t feed[2];
+  memset(feed, 0, sizeof(feed));
+  feed[0].chat_ref = 5;
+  feed[0].unread_count = 3;
+  feed[0].last_msg_uuid = 0x1122334455667788ULL;
+  feed[0].timestamp = 1700000100;
+  strcpy(feed[0].preview, "привет, как дела");
+  feed[1].chat_ref = 6;
+  feed[1].unread_count = 0;
+  strcpy(feed[1].preview, "канал: новости");
+  n = kl_codec_encode_feed_resp(buf, sizeof(buf), 0xFFFF, feed, 2, false);
+  CHECK(n > 0);
+  kl_feed_entry_t fout[KL_FEED_MAX_ENTRIES];
+  CHECK(kl_codec_decode_feed_resp(buf, n, &chat, fout, KL_FEED_MAX_ENTRIES, &count, &more));
+  CHECK(count == 2);
+  CHECK(fout[0].unread_count == 3);
+  CHECK(fout[0].last_msg_uuid == 0x1122334455667788ULL);
+  CHECK(!strcmp(fout[0].preview, "привет, как дела"));
+
+  n = kl_codec_encode_history_req(buf, sizeof(buf), 5, 0xAABBCCDDEEFF0011ULL, 10);
+  uint64_t before = 0;
+  uint8_t limit = 0;
+  CHECK(kl_codec_decode_history_req(buf, n, &chat, &before, &limit));
+  CHECK(before == 0xAABBCCDDEEFF0011ULL);
+  CHECK(limit == 10);
+
+  kl_chat_message_t msgs[2];
+  memset(msgs, 0, sizeof(msgs));
+  msgs[0].msg_uuid = 0x0102030405060708ULL;
+  msgs[0].sender_id = 42;
+  msgs[0].timestamp = 1700000200;
+  strcpy(msgs[0].text, "сообщение один");
+  msgs[1].msg_uuid = 0x0102030405060709ULL;
+  msgs[1].sender_id = 43;
+  strcpy(msgs[1].text, "второе");
+  n = kl_codec_encode_history_resp(buf, sizeof(buf), 5, msgs, 2, false);
+  CHECK(n > 0);
+  kl_chat_message_t mout[KL_HISTORY_MAX_MESSAGES];
+  CHECK(kl_codec_decode_history_resp(buf, n, &chat, mout, KL_HISTORY_MAX_MESSAGES, &count, &more));
+  CHECK(count == 2);
+  CHECK(mout[0].sender_id == 42);
+  CHECK(!strcmp(mout[0].text, "сообщение один"));
+
+  CHECK(kl_rpc_priority_hint(buf, n) == KL_PRIO_LOW);
+  uint8_t text_rpc[32];
+  const size_t text_len = kl_codec_encode_text(text_rpc, sizeof(text_rpc), 1, "ok", 2, 0);
+  CHECK(kl_rpc_priority_hint(text_rpc, text_len) == KL_PRIO_MEDIUM);
+}
+
+/* ------------------------------------------------------ гибридный режим --- */
+
+static void test_hybrid_mode(void) {
+  kl_config_t cfg;
+  kl_config_defaults(&cfg);
+  cfg.node_id = 77;
+  cfg.role = KL_ROLE_CLIENT;
+  cfg.espnow_enabled = true;
+  cfg.lora_present = false;
+
+  FakeWorld world;
+  memset(&world, 0, sizeof(world));
+  kl_router_sink_t sink = {&world, fake_send, fake_deliver, fake_status, fake_archive, NULL, NULL};
+  KlintoRouter r;
+  r.init(&cfg, &sink);
+
+  CHECK(r.relay_enabled());
+  CHECK(r.relay_penalty_ms(KL_IFACE_ESPNOW) == 60);
+  CHECK(r.relay_penalty_ms(KL_IFACE_LORA) == 250);
+  CHECK(!r.mobile_gateway_active());
+
+  r.set_battery(19, -60);
+  CHECK(r.battery_guard_active());
+  CHECK(!r.relay_enabled());
+  r.set_charging(true);
+  CHECK(!r.battery_guard_active());
+  CHECK(r.relay_enabled());
+  r.set_charging(false);
+  r.set_battery(19, -60);
+  CHECK(!r.relay_enabled());
+  r.set_battery(26, -60);
+  CHECK(r.relay_enabled());
+
+  r.set_internet_status(true, 80, true);
+  CHECK(r.mobile_gateway_active());
+  const int before = world.sent_count;
+  r.tick(1000);
+  bool beacon = false;
+  for (int i = before; i < world.sent_count; ++i) {
+    if (world.sent[i].type == KL_TYPE_GW_BEACON) {
+      beacon = true;
+      CHECK(world.sent[i].hop_count == cfg.mobile_gw_hops);
+    }
+  }
+  CHECK(beacon);
+
+  r.set_battery(15, -60);
+  CHECK(!r.mobile_gateway_active());
+  r.set_internet_status(false, 0, true);
+  CHECK(!r.mobile_gateway_active());
+
+  kl_config_t rc = cfg;
+  rc.role = KL_ROLE_ROUTER;
+  KlintoRouter router;
+  router.init(&rc, &sink);
+  CHECK(router.relay_penalty_ms(KL_IFACE_ESPNOW) == 0);
+  CHECK(router.relay_penalty_ms(KL_IFACE_LORA) == 0);
+}
+
+/* ------------------------------------------------ дельта-патч и OTA ------ */
+
+static size_t make_test_patch(const uint8_t *base, size_t base_len, const uint8_t *target,
+                              size_t target_len, const uint8_t *add, size_t add_len,
+                              size_t split, uint8_t *out, size_t cap) {
+  if (!base || !target || !out || split > base_len || split > target_len) return 0;
+  const size_t copy1 = split;
+  const size_t copy2 = target_len - split - add_len;
+  const size_t need = KL_PATCH_HEADER_SIZE + 1 + 8 + 1 + 2 + add_len + 1 + 8 + 1;
+  if (cap < need || split + add_len > target_len) return 0;
+  size_t o = 0;
+  memcpy(out + o, "KLDP", 4);
+  o += 4;
+  out[o++] = KL_PATCH_VERSION;
+  kl_write_le32(out + o, (uint32_t)base_len);
+  o += 4;
+  kl_write_le32(out + o, (uint32_t)target_len);
+  o += 4;
+  uint8_t sha[32];
+  kl_sha256(target, target_len, sha);
+  memcpy(out + o, sha, 32);
+  o += 32;
+  out[o++] = KL_PATCH_OP_COPY;
+  kl_write_le32(out + o, 0);
+  o += 4;
+  kl_write_le32(out + o, (uint32_t)copy1);
+  o += 4;
+  out[o++] = KL_PATCH_OP_ADD;
+  kl_write_le16(out + o, (uint16_t)add_len);
+  o += 2;
+  memcpy(out + o, add, add_len);
+  o += add_len;
+  out[o++] = KL_PATCH_OP_COPY;
+  kl_write_le32(out + o, (uint32_t)(split + add_len));
+  o += 4;
+  kl_write_le32(out + o, (uint32_t)copy2);
+  o += 4;
+  out[o++] = KL_PATCH_OP_END;
+  return o;
+}
+
+static void test_delta_patcher(void) {
+  uint8_t base[120];
+  for (size_t i = 0; i < sizeof(base); ++i) base[i] = (uint8_t)(i * 7 + 3);
+  const uint8_t add[10] = {0xde, 0xad, 0xbe, 0xef, 1, 2, 3, 4, 5, 6};
+  uint8_t target[120];
+  memcpy(target, base, 40);
+  memcpy(target + 40, add, sizeof(add));
+  memcpy(target + 50, base + 50, 70);
+
+  uint8_t patch[256];
+  const size_t plen = make_test_patch(base, sizeof(base), target, sizeof(target), add,
+                                      sizeof(add), 40, patch, sizeof(patch));
+  CHECK(plen > 0);
+  kl_patch_header_t hdr;
+  CHECK(kl_patch_parse_header(patch, plen, &hdr));
+  CHECK(hdr.base_size == sizeof(base));
+  CHECK(hdr.target_size == sizeof(target));
+
+  uint8_t out[120];
+  size_t out_len = 0;
+  uint8_t sha[32];
+  CHECK(kl_patch_apply_memory(base, sizeof(base), patch, plen, out, sizeof(out), &out_len, sha));
+  CHECK(out_len == sizeof(target));
+  CHECK(!memcmp(out, target, sizeof(target)));
+  uint8_t expect[32];
+  kl_sha256(target, sizeof(target), expect);
+  CHECK(!memcmp(sha, expect, 32));
+
+  /* Испорченный target_sha256 — патч не применяется. */
+  patch[13] ^= 0xff;
+  CHECK(!kl_patch_apply_memory(base, sizeof(base), patch, plen, out, sizeof(out), &out_len, sha));
+  patch[13] ^= 0xff;
+
+  /* Обрезанный патч. */
+  CHECK(!kl_patch_apply_memory(base, sizeof(base), patch, plen - 3, out, sizeof(out), &out_len,
+                               sha));
+  CHECK(!kl_patch_parse_header(patch, 10, &hdr));
+}
+
+struct FakeOta {
+  uint8_t base[120];
+  size_t base_len;
+  uint8_t patch[512];
+  size_t patch_len;
+  uint8_t target[120];
+  size_t target_len;
+  uint8_t target_sha[32];
+  kl_ota_manifest_t committed;
+  bool commit_ok;
+  bool verify_ok;
+  bool rebooted;
+  bool marked;
+  bool aborted;
+};
+
+static bool fake_patch_write(void *ctx, uint32_t off, const uint8_t *data, size_t len) {
+  FakeOta *f = (FakeOta *)ctx;
+  if (off + len > sizeof(f->patch)) return false;
+  memcpy(f->patch + off, data, len);
+  if (off + len > f->patch_len) f->patch_len = off + len;
+  return true;
+}
+static bool fake_patch_read(void *ctx, uint32_t off, uint8_t *out, size_t len) {
+  FakeOta *f = (FakeOta *)ctx;
+  if (off + len > f->patch_len) return false;
+  memcpy(out, f->patch + off, len);
+  return true;
+}
+static bool fake_patch_erase(void *ctx) {
+  FakeOta *f = (FakeOta *)ctx;
+  f->patch_len = 0;
+  return true;
+}
+static bool fake_read_running(void *ctx, uint32_t off, uint8_t *out, size_t len) {
+  FakeOta *f = (FakeOta *)ctx;
+  if (off + len > f->base_len) return false;
+  memcpy(out, f->base + off, len);
+  return true;
+}
+static bool fake_begin_target(void *ctx, uint32_t size) {
+  FakeOta *f = (FakeOta *)ctx;
+  f->target_len = 0;
+  return size <= sizeof(f->target);
+}
+static bool fake_write_target(void *ctx, const uint8_t *data, size_t len) {
+  FakeOta *f = (FakeOta *)ctx;
+  if (f->target_len + len > sizeof(f->target)) return false;
+  memcpy(f->target + f->target_len, data, len);
+  f->target_len += len;
+  return true;
+}
+static bool fake_commit_target(void *ctx, const uint8_t sha[32], const kl_ota_manifest_t *m) {
+  FakeOta *f = (FakeOta *)ctx;
+  if (!f->commit_ok || memcmp(sha, m->target_sha256, 32) != 0) return false;
+  f->committed = *m;
+  memcpy(f->target_sha, sha, 32);
+  return true;
+}
+static void fake_abort_target(void *ctx) { ((FakeOta *)ctx)->aborted = true; }
+static void fake_reboot(void *ctx) { ((FakeOta *)ctx)->rebooted = true; }
+static bool fake_verify(void *ctx, const uint8_t *digest, const uint8_t *sig, size_t sig_len) {
+  FakeOta *f = (FakeOta *)ctx;
+  return f->verify_ok && digest && sig && sig_len == 4 && !memcmp(sig, "SIGN", 4);
+}
+static void fake_mark_valid(void *ctx) { ((FakeOta *)ctx)->marked = true; }
+
+static void test_ota(void) {
+  FakeOta f;
+  memset(&f, 0, sizeof(f));
+  f.base_len = 120;
+  for (size_t i = 0; i < f.base_len; ++i) f.base[i] = (uint8_t)(i * 5 + 1);
+  const uint8_t add[8] = {9, 8, 7, 6, 5, 4, 3, 2};
+  const size_t split = 48;
+  uint8_t target[120];
+  memcpy(target, f.base, split);
+  memcpy(target + split, add, sizeof(add));
+  memcpy(target + split + sizeof(add), f.base + split + sizeof(add),
+          sizeof(target) - split - sizeof(add));
+  const size_t patch_len = make_test_patch(f.base, f.base_len, target, sizeof(target), add,
+                                           sizeof(add), split, f.patch, sizeof(f.patch));
+  CHECK(patch_len > 0);
+  f.commit_ok = true;
+  f.verify_ok = true;
+
+  kl_ota_platform_t plat = {&f, fake_patch_write, fake_patch_read, fake_patch_erase,
+                            fake_read_running, fake_begin_target, fake_write_target,
+                            fake_commit_target, fake_abort_target, fake_reboot, fake_verify,
+                            fake_mark_valid};
+  KlintoOta ota;
+  ota.init(&plat, KL_CHIP_ESP32C3, 120, 120);
+  ota.set_battery(30, false);
+
+  kl_ota_manifest_t m;
+  memset(&m, 0, sizeof(m));
+  m.patch_id = 7;
+  m.chip = KL_CHIP_ESP32C3;
+  m.base_build = 120;
+  m.target_build = 130;
+  m.total_chunks = (uint16_t)((patch_len + KL_OTA_CHUNK_DATA - 1) / KL_OTA_CHUNK_DATA);
+  m.patch_size = (uint32_t)patch_len;
+  kl_sha256(f.patch, patch_len, m.patch_sha256);
+  kl_sha256(target, sizeof(target), m.target_sha256);
+  m.sig_len = 4;
+  memcpy(m.sig, "SIGN", 4);
+
+  uint8_t payload[200];
+  const size_t ann_len = kl_ota_encode_announce(&m, payload, sizeof(payload));
+  CHECK(ann_len > 0);
+  kl_ota_manifest_t decoded;
+  CHECK(kl_ota_decode_announce(payload, ann_len, &decoded));
+  CHECK(decoded.target_build == 130);
+  CHECK(decoded.total_chunks == m.total_chunks);
+
+  /* Подпись манифеста детерминирована. */
+  uint8_t d1[32], d2[32];
+  kl_ota_manifest_digest(&m, d1);
+  kl_ota_manifest_digest(&decoded, d2);
+  CHECK(!memcmp(d1, d2, 32));
+
+  kl_packet_t pkt;
+  memset(&pkt, 0, sizeof(pkt));
+  pkt.type = KL_TYPE_OTA_ANNOUNCE;
+  pkt.payload_len = (uint8_t)ann_len;
+  memcpy(pkt.payload, payload, ann_len);
+
+  /* АКБ < 40%: скачивание отложено. */
+  CHECK(ota.handle_packet(&pkt, 1000));
+  CHECK(ota.state() == KL_OTA_IDLE);
+  CHECK(f.patch_len == 0);
+
+  ota.set_battery(55, false);
+  ota.tick(2000);
+  CHECK(ota.state() == KL_OTA_DOWNLOADING);
+
+  /* Чанки приходят в обратном порядке — сборка всё равно возможна. */
+  for (int i = (int)m.total_chunks - 1; i >= 0; --i) {
+    const uint32_t off = (uint32_t)i * KL_OTA_CHUNK_DATA;
+    const uint32_t left = m.patch_size - off;
+    const uint8_t take = (uint8_t)(left > KL_OTA_CHUNK_DATA ? KL_OTA_CHUNK_DATA : left);
+    uint8_t cpayload[200];
+    const size_t clen = kl_ota_encode_chunk(m.patch_id, (uint16_t)i, f.patch + off, take,
+                                            cpayload, sizeof(cpayload));
+    CHECK(clen > 0);
+    kl_packet_t cpkt;
+    memset(&cpkt, 0, sizeof(cpkt));
+    cpkt.type = KL_TYPE_OTA_CHUNK;
+    cpkt.payload_len = (uint8_t)clen;
+    memcpy(cpkt.payload, cpayload, clen);
+    CHECK(ota.handle_packet(&cpkt, 3000 + (uint32_t)i));
+  }
+  CHECK(ota.state() == KL_OTA_VERIFYING);
+  ota.tick(5000);
+  CHECK(ota.state() == KL_OTA_PENDING_REBOOT);
+  CHECK(f.target_len == sizeof(target));
+  CHECK(!memcmp(f.target, target, sizeof(target)));
+  CHECK(f.committed.target_build == 130);
+  ota.tick(6000);
+  ota.tick(9000);
+  CHECK(f.rebooted);
+
+  /* Анти-откат: старый build игнорируется. */
+  KlintoOta ota2;
+  ota2.init(&plat, KL_CHIP_ESP32C3, 130, 130);
+  ota2.set_battery(80, false);
+  kl_ota_manifest_t old = m;
+  old.target_build = 125;
+  kl_ota_manifest_digest(&old, d1);
+  const size_t old_len = kl_ota_encode_announce(&old, payload, sizeof(payload));
+  pkt.payload_len = (uint8_t)old_len;
+  memcpy(pkt.payload, payload, old_len);
+  CHECK(ota2.handle_packet(&pkt, 1000));
+  CHECK(ota2.state() == KL_OTA_IDLE);
+
+  /* Неверная подпись — отказ. */
+  KlintoOta ota3;
+  ota3.init(&plat, KL_CHIP_ESP32C3, 120, 120);
+  ota3.set_battery(80, false);
+  f.verify_ok = false;
+  const size_t good_len = kl_ota_encode_announce(&m, payload, sizeof(payload));
+  pkt.payload_len = (uint8_t)good_len;
+  memcpy(pkt.payload, payload, good_len);
+  CHECK(ota3.handle_packet(&pkt, 1000));
+  CHECK(ota3.state() == KL_OTA_IDLE);
+
+  uint8_t nack[8];
+  CHECK(kl_ota_encode_nack(7, 32, 0xA5A5A5A5u, nack, sizeof(nack)) == 8);
+  uint16_t pid = 0, win = 0;
+  uint32_t mask = 0;
+  CHECK(kl_ota_decode_nack(nack, sizeof(nack), &pid, &win, &mask));
+  CHECK(pid == 7 && win == 32 && mask == 0xA5A5A5A5u);
+
+  ota.mark_boot_valid();
+  CHECK(f.marked);
+}
+
+static void test_presence_telemetry(void) {
+  kl_presence_telemetry_t t;
+  t.fw_build = 130;
+  t.chip_arch = KL_CHIP_ESP32C6;
+  t.node_role = KL_NODE_HYBRID;
+  t.radio_caps = KL_RADIO_LORA | KL_RADIO_SX1262 | KL_RADIO_BLE;
+  t.ota_state = KL_OTA_DOWNLOADING;
+  t.battery_pct = 77;
+  t.owner_net_id = 0x12345678u;
+  uint8_t payload[24];
+  const size_t n = kl_codec_encode_presence_ex(payload, sizeof(payload), 76, -70, 0, 3, &t);
+  CHECK(n == 19);
+  kl_presence_telemetry_t out;
+  CHECK(kl_codec_decode_presence_telemetry(payload, n, &out));
+  CHECK(out.fw_build == 130);
+  CHECK(out.chip_arch == KL_CHIP_ESP32C6);
+  CHECK(out.node_role == KL_NODE_HYBRID);
+  CHECK(out.radio_caps == (KL_RADIO_LORA | KL_RADIO_SX1262 | KL_RADIO_BLE));
+  CHECK(out.ota_state == KL_OTA_DOWNLOADING);
+  CHECK(out.battery_pct == 77);
+  CHECK(out.owner_net_id == 0x12345678u);
+  /* Старый 8-байтный формат остаётся читаемым. */
+  const size_t old_n = kl_codec_encode_presence(payload, sizeof(payload), 50, -80, 0, 1);
+  CHECK(old_n == 8);
+  CHECK(!kl_codec_decode_presence_telemetry(payload, old_n, &out));
+}
+
+static bool fake_owner_verify(void *ctx, const uint8_t digest[32], const uint8_t *sig,
+                              size_t sig_len) {
+  const bool *accept = (const bool *)ctx;
+  (void)digest;
+  return *accept && sig && sig_len == 4 && !memcmp(sig, "SIGN", 4);
+}
+
+static void test_owner_identity(void) {
+  const uint8_t mac[6] = {0x24, 0x6f, 0x28, 0xab, 0xcd, 0xef};
+  char name[KL_OWNER_NAME_LEN];
+  const size_t n = kl_ble_name_build("A1B2C3D4", mac, name, sizeof(name));
+  CHECK(n == 18);
+  CHECK(!strcmp(name, "KL-a1b2c3d4-abcdef"));
+  CHECK(strlen(name) == 18);
+  CHECK(sizeof(name) == 19);
+
+  char bad[KL_OWNER_NAME_LEN];
+  CHECK(kl_ble_name_build("zzzzzzzz", mac, bad, sizeof(bad)) == 0);
+  CHECK(kl_owner_prefix_valid("a1b2c3d4"));
+  CHECK(!kl_owner_prefix_valid("A1B2C3D4"));
+  char norm[9];
+  CHECK(kl_owner_prefix_normalize("A1B2C3D4", norm));
+  CHECK(!strcmp(norm, "a1b2c3d4"));
+
+  kl_owner_claim_t claim;
+  memset(&claim, 0, sizeof(claim));
+  strcpy(claim.prefix, "a1b2c3d4");
+  claim.net_id = 0x10203040u;
+  claim.epoch = 1710000000u;
+  claim.sig_len = 4;
+  memcpy(claim.sig, "SIGN", 4);
+  uint8_t digest[32];
+  CHECK(kl_owner_claim_digest("abcdef", &claim, digest));
+  bool accept = true;
+  CHECK(kl_owner_claim_verify("abcdef", &claim, fake_owner_verify, &accept));
+  accept = false;
+  CHECK(!kl_owner_claim_verify("abcdef", &claim, fake_owner_verify, &accept));
+  claim.sig_len = 0;
+  CHECK(!kl_owner_claim_verify("abcdef", &claim, fake_owner_verify, &accept));
+
+  /* Формат BRIDGE_CMD_SET_OWNER: prefix(8) net(4) epoch(4) sig_len(1) sig. */
+  uint8_t wire[64];
+  memcpy(wire, "a1b2c3d4", 8);
+  kl_write_le32(wire + 8, 0x10203040u);
+  kl_write_le32(wire + 12, 1710000000u);
+  wire[16] = 4;
+  memcpy(wire + 17, "SIGN", 4);
+  kl_owner_claim_t parsed;
+  CHECK(kl_owner_claim_parse(wire, 21, &parsed));
+  CHECK(!strcmp(parsed.prefix, "a1b2c3d4"));
+  CHECK(parsed.net_id == 0x10203040u);
+  CHECK(parsed.epoch == 1710000000u);
+  CHECK(!kl_owner_claim_parse(wire, 18, &parsed));
+}
+
+/* ------------------------------------------- мост ESP-NOW <-> LoRa ------- */
+/* A(ESP-NOW) -- R1(ESP-NOW+LoRa) ==LoRa== R2(ESP-NOW+LoRa) -- G(ESP-NOW):
+ * один тип пакетов, разные транспорты; R1 и R2 слышат друг друга только по LoRa. */
+struct SimLink {
+  int a, b;
+  uint8_t iface;
+};
+
+static void sim_pump(KlintoRouter *nodes, FakeWorld *worlds, int n, const SimLink *links, int nl,
+                     uint32_t *now, uint32_t until) {
+  while (*now < until) {
+    for (int round = 0; round < 4; ++round) {
+      for (int i = 0; i < n; ++i) {
+        FakeWorld snapshot = worlds[i];
+        worlds[i].sent_count = 0;
+        for (int k = 0; k < snapshot.sent_count; ++k) {
+          for (int l = 0; l < nl; ++l) {
+            if (links[l].iface != snapshot.sent_iface[k]) continue;
+            int peer = -1;
+            if (links[l].a == i) peer = links[l].b;
+            if (links[l].b == i) peer = links[l].a;
+            if (peer < 0) continue;
+            nodes[peer].on_packet(&snapshot.sent[k], snapshot.sent_iface[k], -60, *now);
+          }
+        }
+      }
+    }
+    for (int i = 0; i < n; ++i) nodes[i].tick(*now);
+    *now += 20;
+  }
+}
+
+static void test_multi_transport_bridge(void) {
+  enum { A = 0, R1 = 1, R2 = 2, G = 3, N = 4 };
+  static FakeWorld w[N];
+  memset(w, 0, sizeof(w));
+  static KlintoRouter r[N];
+  kl_config_t base;
+  kl_config_defaults(&base);
+  const uint32_t ids[N] = {11, 21, 22, 99};
+  for (int i = 0; i < N; ++i) {
+    kl_config_t c = base;
+    c.node_id = ids[i];
+    c.role = i == G ? KL_ROLE_GATEWAY : i == A ? KL_ROLE_CLIENT : KL_ROLE_ROUTER;
+    c.espnow_enabled = true;
+    c.lora_present = (i == R1 || i == R2);
+    c.lora.present = c.lora_present;
+    kl_router_sink_t sink = {&w[i], fake_send, fake_deliver, fake_status, fake_archive, NULL, NULL};
+    r[i].init(&c, &sink);
+  }
+  CHECK(r[R1].interface_mask() == (KL_IFACE_MASK_ESPNOW | KL_IFACE_MASK_LORA));
+  CHECK(r[A].interface_mask() == KL_IFACE_MASK_ESPNOW);
+  const SimLink links[] = {{A, R1, KL_IFACE_ESPNOW}, {R1, R2, KL_IFACE_LORA}, {R2, G, KL_IFACE_ESPNOW}};
+  uint32_t now = 1000;
+
+  r[G].emit_gateway_beacon(now);
+  sim_pump(r, w, N, links, 3, &now, now + 3000);
+  CHECK(r[A].gateway_route()->valid);
+  CHECK(r[A].gateway_route()->next_hop_id == ids[R1]);
+  CHECK(r[R1].gateway_route()->valid);
+  CHECK(r[R1].gateway_route()->iface == KL_IFACE_LORA);
+  CHECK(r[R1].gateway_route()->next_hop_id == ids[R2]);
+  CHECK(r[R2].gateway_route()->iface == KL_IFACE_ESPNOW);
+
+  /* Uplink A -> шлюз: ESP-NOW, затем LoRa, затем снова ESP-NOW. */
+  const int delivered_before = w[G].delivered;
+  kl_packet_t up;
+  kl_packet_init(&up, KL_TYPE_DATA, 0, KL_ANY_GATEWAY_ID, 0, KL_FLAG_TO_INTERNET);
+  up.msg_uuid = 0xA11;
+  kl_packet_set_payload(&up, "bridge", 6);
+  r[A].send(&up, now, 0xFF, false);
+  sim_pump(r, w, N, links, 3, &now, now + 2000);
+  CHECK(w[G].delivered > delivered_before);
+  CHECK(r[R1].stats()->relayed > 0);
+  CHECK(r[R2].stats()->relayed > 0);
+
+  /* Downlink шлюз -> A по обратному пути (маршрут выучен из uplink). */
+  const int a_before = w[A].delivered;
+  kl_packet_t down;
+  kl_packet_init(&down, KL_TYPE_DATA, 0, ids[A], 0, 0);
+  down.msg_uuid = 0xD0;
+  kl_packet_set_payload(&down, "down", 4);
+  r[G].send(&down, now, 0xFF, false);
+  sim_pump(r, w, N, links, 3, &now, now + 4000);
+  CHECK(w[A].delivered > a_before);
+
+  /* OTA-пакеты идут только по выбранным транспортам и не ретранслируются (TTL 1). */
+  w[R1].sent_count = 0;
+  kl_packet_t ota;
+  kl_packet_init(&ota, KL_TYPE_OTA_ANNOUNCE, 0, KL_BROADCAST_ID, KL_BROADCAST_ID, 0);
+  kl_packet_set_payload(&ota, "x", 1);
+  CHECK(r[R1].send_ota(&ota, KL_IFACE_MASK_LORA, now));
+  CHECK(w[R1].sent_count == 1 && w[R1].sent_iface[0] == KL_IFACE_LORA && w[R1].sent[0].ttl == 1);
+}
+
+int main(void) {
+  setbuf(stdout, NULL);
+  printf("Klinto mesh core tests\n");
+  test_sha_hmac();
+  test_chacha();
+  test_packet();
+  test_codec();
+  test_crypto();
+  test_dedup();
+  test_router_direct();
+  test_router_route_discovery();
+  test_gateway_gradient();
+  test_flash_queue();
+  test_bridge_e2e();
+  test_gateway();
+  test_channel_plan();
+  test_cell_manager();
+  test_rpc_services();
+  test_hybrid_mode();
+  test_delta_patcher();
+  test_ota();
+  test_presence_telemetry();
+  test_owner_identity();
+  test_multi_transport_bridge();
+  printf("%d checks, %d failures\n", g_checks, g_failures);
+  return g_failures ? 1 : 0;
+}

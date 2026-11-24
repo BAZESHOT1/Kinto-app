@@ -1,0 +1,296 @@
+/**
+ * Klinto KMesh_v1 — ядро маршрутизации.
+ *
+ * Гибридная схема: AODV для узел-узел, градиент шлюзов для uplink,
+ * RSSI-подавление broadcast, L3 ACK с повторами и NODE_PRESENCE.
+ *
+ * Важно: в LoRa нет link-layer адреса отправителя, поэтому каждый
+ * передатчик заполняет last_hop_id — по нему строится обратный маршрут.
+ */
+#ifndef KLINTO_ROUTER_H
+#define KLINTO_ROUTER_H
+
+#include "klinto_config.h"
+#include "klinto_packet.h"
+#include "klinto_dedup.h"
+#include "klinto_net.h"
+
+#define KL_ROUTE_TABLE_SIZE 256
+#define KL_NEIGHBOR_TABLE 64
+#define KL_PENDING_QUEUE 12
+#define KL_ACK_TABLE 16
+#define KL_BCAST_QUEUE 8
+#define KL_RREQ_RETRY_MS 2500u
+#define KL_RREQ_MAX_TRIES 3
+#define KL_CAP_MOBILE_GW 0x04
+#define KL_CAP_HYBRID_PORTABLE 0x08
+
+struct kl_route_entry_t {
+  uint32_t dst_id;
+  uint32_t next_hop_id;
+  uint8_t iface;
+  uint8_t hops;
+  int16_t rssi;
+  uint32_t last_seen_ms;
+  uint32_t expires_ms;
+  bool valid;
+  bool is_gateway;
+};
+
+struct kl_neighbor_t {
+  uint32_t node_id;
+  uint8_t iface;
+  int16_t rssi;
+  uint8_t hops;
+  uint32_t last_seen_ms;
+  bool is_gateway;
+  bool used;
+};
+
+struct kl_gw_route_t {
+  bool valid;
+  bool mobile;
+  uint32_t gateway_id;
+  uint32_t next_hop_id;
+  uint8_t iface;
+  uint8_t hops;
+  int16_t rssi;
+  uint32_t last_seen_ms;
+  uint32_t expires_ms;
+};
+
+struct kl_pending_t {
+  bool used;
+  uint8_t tries;
+  uint8_t iface_hint;
+  uint32_t queued_ms;
+  uint32_t next_try_ms;
+  kl_packet_t pkt;
+};
+
+struct kl_ack_slot_t {
+  bool used;
+  bool via_gateway;
+  uint8_t attempts;
+  uint32_t deadline_ms;
+  kl_packet_t pkt;
+};
+
+/** Недавно подтверждённые шлюзом пакеты: Hub-подтверждение («сохранено») приходит позже и должно
+ * найти msg_uuid, хотя запись в acks_ уже освобождена. */
+struct kl_recent_ack_t {
+  uint32_t packet_id;
+  uint64_t msg_uuid;
+  uint32_t at_ms;
+};
+
+struct kl_bcast_slot_t {
+  bool used;
+  uint32_t packet_id;
+  uint32_t due_ms;
+  kl_packet_t pkt;
+};
+
+struct kl_router_stats_t {
+  uint32_t rx_packets;
+  uint32_t tx_packets;
+  uint32_t dropped_dedup;
+  uint32_t dropped_ttl;
+  uint32_t dropped_policy;
+  uint32_t relayed;
+  uint32_t delivered;
+  uint32_t acks_sent;
+  uint32_t acks_received;
+  uint32_t retries;
+  uint32_t failures;
+  uint32_t rreq_sent;
+  uint32_t rrep_sent;
+  uint32_t beacons_sent;
+  uint32_t presence_sent;
+};
+
+struct kl_router_sink_t {
+  void *ctx;
+  /** Transmit on one interface. Return false on queue overflow. */
+  bool (*send)(void *ctx, const kl_packet_t *pkt, uint8_t iface, uint32_t next_hop);
+  /** Packet addressed to this node (or a broadcast we care about). */
+  void (*deliver)(void *ctx, const kl_packet_t *pkt, int16_t rssi, uint8_t iface);
+  /** Delivery state for the app. */
+  void (*status)(void *ctx, uint64_t msg_uuid, uint32_t packet_id, uint8_t status);
+  /** Gateway overheard a message that must be mirrored to the cloud. */
+  void (*archive)(void *ctx, const kl_packet_t *pkt);
+  /** Gateway learned a node's current attachment point. */
+  void (*presence)(void *ctx, const kl_packet_t *pkt, int16_t rssi, uint8_t iface);
+  /** Принят GW_BEACON: менеджер соты обновляет RSSI и запускает хэндовер. */
+  void (*beacon)(void *ctx, const kl_packet_t *pkt, int16_t rssi, uint8_t iface);
+};
+
+class KlintoRouter {
+ public:
+  KlintoRouter();
+  void init(const kl_config_t *cfg, const kl_router_sink_t *sink);
+  void set_interface_mask(uint8_t mask) { iface_mask_ = mask ? mask : KL_IFACE_MASK_ESPNOW; }
+  uint8_t interface_mask() const { return iface_mask_; }
+
+  /** Application-originated packet. Fills src/ttl/packet_id/next_hop. */
+  bool send(kl_packet_t *pkt, uint32_t now_ms, uint8_t iface_hint = 0xFF, bool need_ack = true);
+
+  /** OTA-пакет соседям (TTL 1, без ретрансляции) только через транспорты из mask. */
+  bool send_ota(kl_packet_t *pkt, uint8_t mask, uint32_t now_ms);
+  /** Когда последний раз что-то принято по транспорту (0 — ни разу с загрузки). */
+  uint32_t last_rx_ms(uint8_t iface) const { return iface < KL_IFACE_COUNT ? last_rx_ms_[iface] : 0; }
+
+  /**
+   * Пакет из интернета: маршрутизировать без перезаписи src_id и принудительно
+   * выставить FROM_INTERNET. Используется NODE_GATEWAY для downlink.
+   */
+  bool forward_downlink(kl_packet_t *pkt, uint32_t now_ms);
+
+  /**
+   * Подтверждение доставки, пришедшее от телефона-шлюза (мобильный шлюз):
+   * снимает пакет с повторов и отдаёт приложению статус «сохранено в Hub».
+   */
+  bool confirm_delivery(uint32_t packet_id, bool hub_confirmed);
+
+  /** Entry point for every received frame. */
+  void on_packet(const kl_packet_t *pkt, uint8_t iface, int16_t rssi, uint32_t now_ms);
+
+  /** Timers: retries, suppression, beacons, presence, route expiry. */
+  void tick(uint32_t now_ms);
+
+  /** Периодически вызывается runtime; процент АКБ и зарядка. */
+  void set_battery(uint8_t percent, int8_t rssi);
+  void set_charging(bool charging);
+  void set_relay_allowed(bool allowed);
+  void set_internet_status(bool has_internet, uint16_t rtt_ms, bool allow_relay);
+  void set_capabilities(uint8_t caps) { capabilities_ = caps; }
+  /** Телеметрия прошивки для NODE_PRESENCE. */
+  void set_telemetry(uint16_t fw_build, uint8_t chip_arch, uint8_t radio_caps) {
+    fw_build_ = fw_build;
+    chip_arch_ = chip_arch;
+    radio_caps_ = radio_caps;
+  }
+  void set_ota_state(uint8_t state) { ota_state_ = state; }
+  void set_owner_net_id(uint32_t id) { owner_net_id_ = id; }
+  uint32_t owner_net_id() const { return owner_net_id_; }
+  uint16_t fw_build() const { return fw_build_; }
+  uint8_t chip_arch() const { return chip_arch_; }
+
+  bool relay_enabled() const;
+  bool mobile_gateway_active() const;
+  bool battery_guard_active() const { return battery_low_; }
+  uint8_t battery_percent() const { return battery_; }
+  uint16_t internet_rtt_ms() const { return inet_rtt_ms_; }
+
+  const kl_route_entry_t *route(uint32_t dst_id) const;
+  const kl_gw_route_t *gateway_route() const { return &gw_; }
+  /** Диагностика для INFO: сколько beacon'ов услышали и когда последний. */
+  uint32_t beacons_rx() const { return beacons_rx_; }
+  int32_t gateway_age_ms(uint32_t now_ms) const {
+    return gw_.valid ? (int32_t)(now_ms - gw_.last_seen_ms) : -1;
+  }
+  uint8_t channel() const { return cfg_.wifi_channel; }
+  const kl_neighbor_t *neighbors() const { return neighbors_; }
+  uint16_t neighbor_count() const;
+
+  /** Pre-seed a static route (provisioning, tests, fixed backbones). */
+  void seed_route(uint32_t dst_id, uint32_t next_hop_id, uint8_t iface, uint8_t hops,
+                  int16_t rssi, uint32_t now_ms) {
+    KlintoGuard guard(lock_);
+    upsert_route(dst_id, next_hop_id, iface, hops, rssi, now_ms, false);
+  }
+
+  /** Gateway only: broadcast a fresh gradient beacon now. */
+  void emit_gateway_beacon(uint32_t now_ms);
+
+  /** Скан соты: широковещательный GW_PROBE; шлюз отвечает маяком немедленно. */
+  void emit_probe(uint32_t now_ms);
+
+  /** Сменить радиосоту: сбросить маршруты/маяки, привязанные к старому каналу. */
+  void on_channel_changed(uint8_t wifi_channel);
+
+  /** Немедленно отправить NODE_PRESENCE (после выбора новой соты). */
+  void request_presence() {
+    KlintoGuard guard(lock_);
+    last_presence_ms_ = 0;
+  }
+
+  /** Called by the gateway when the server acknowledges a downlink/uplink. */
+  void notify_status(uint64_t msg_uuid, uint32_t packet_id, uint8_t status);
+
+  /** Delay in ms for RSSI-based broadcast suppression (weak = fast). */
+  static uint32_t backoff_delay_ms(int16_t rssi, uint32_t salt = 0);
+  /** Штраф носимого ретранслятора поверх RSSI-backoff. */
+  uint16_t relay_penalty_ms(uint8_t iface) const;
+
+  const kl_router_stats_t *stats() const { return &stats_; }
+  uint16_t pending_count() const;
+  uint16_t ack_count() const;
+
+ private:
+  void learn_neighbor(uint32_t node_id, uint8_t iface, int16_t rssi, uint32_t now_ms,
+                      uint8_t hops, bool is_gateway);
+  bool upsert_route(uint32_t dst_id, uint32_t next_hop_id, uint8_t iface, uint8_t hops,
+                    int16_t rssi, uint32_t now_ms, bool is_gateway);
+  const kl_route_entry_t *find_route(uint32_t dst_id) const;
+  void expire(uint32_t now_ms);
+  void handle_beacon(const kl_packet_t *pkt, uint8_t iface, int16_t rssi, uint32_t now_ms);
+  void learn_reverse_route(const kl_packet_t *pkt, uint8_t iface, int16_t rssi, uint32_t now_ms);
+  void handle_rreq(kl_packet_t *pkt, uint8_t iface, int16_t rssi, uint32_t now_ms);
+  void handle_rrep(kl_packet_t *pkt, uint8_t iface, int16_t rssi, uint32_t now_ms);
+  void send_ack(const kl_packet_t *original, uint8_t iface, uint32_t now_ms);
+  bool send_rreq(uint32_t target, uint8_t iface_hint, uint32_t now_ms);
+  void schedule_broadcast(const kl_packet_t *pkt, int16_t rssi, uint32_t now_ms, uint8_t iface);
+  void cancel_broadcast(uint32_t packet_id);
+  bool transmit(const kl_packet_t *pkt, uint8_t iface, uint32_t next_hop, uint32_t now_ms);
+  bool transmit_on_all(const kl_packet_t *pkt, uint32_t now_ms);
+  void queue_pending(const kl_packet_t *pkt, uint8_t iface_hint, uint32_t now_ms);
+  void flush_pending(uint32_t dst_id, uint32_t now_ms);
+  void register_ack(const kl_packet_t *pkt, bool via_gateway, uint32_t now_ms);
+  bool is_gateway() const { return cfg_.role == KL_ROLE_GATEWAY; }
+  bool gateway_like() const;
+  void emit_mobile_beacon(uint32_t now_ms);
+  void emit_gateway_beacon_locked(uint32_t now_ms);
+  uint32_t last_probe_reply_ms_ = 0;
+  void maybe_presence(uint32_t now_ms);
+
+  kl_config_t cfg_;
+  kl_router_sink_t sink_;
+  uint8_t iface_mask_;
+  uint32_t last_rx_ms_[KL_IFACE_COUNT] = {0};
+  KlintoDedup dedup_;
+
+  kl_route_entry_t routes_[KL_ROUTE_TABLE_SIZE];
+  kl_neighbor_t neighbors_[KL_NEIGHBOR_TABLE];
+  kl_gw_route_t gw_;
+  kl_pending_t pending_[KL_PENDING_QUEUE];
+  kl_ack_slot_t acks_[KL_ACK_TABLE];
+  kl_recent_ack_t recent_acks_[8] = {};
+  uint8_t recent_ack_idx_ = 0;
+  kl_bcast_slot_t bcasts_[KL_BCAST_QUEUE];
+
+  uint8_t battery_;
+  int8_t last_rssi_;
+  uint8_t capabilities_;
+  bool charging_;
+  bool battery_low_;
+  bool relay_allowed_;
+  bool inet_has_;
+  bool mobile_gateway_;
+  uint16_t inet_rtt_ms_;
+  uint16_t fw_build_;
+  uint8_t chip_arch_;
+  uint8_t radio_caps_;
+  uint8_t ota_state_;
+  uint32_t owner_net_id_;
+  uint32_t last_presence_ms_;
+  uint32_t last_presence_gw_hop_;
+  uint32_t last_beacon_ms_;
+  uint32_t last_mobile_beacon_ms_;
+  uint32_t beacons_rx_ = 0;
+  uint32_t boot_ms_;
+  kl_router_stats_t stats_;
+  KlintoLock lock_;
+};
+
+#endif  // KLINTO_ROUTER_H

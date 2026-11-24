@@ -1,0 +1,208 @@
+/**
+ * Klinto KMesh_v1 — конфигурация времени выполнения.
+ *
+ * Узел собирается пользователем, поэтому наличие LoRa, чип и пины —
+ * данные, а не выбор при компиляции. Builder задаёт значения по умолчанию,
+ * NVS/JSON может переопределить их на устройстве.
+ */
+#ifndef KLINTO_CONFIG_H
+#define KLINTO_CONFIG_H
+
+/* Сгенерированный сборщиком config.h содержит KL_HAS_LORA/BLE/MQTT,
+ * KL_CHIP_ARCH, KL_FIRMWARE_BUILD и ключ OTA. Подключаем его во всех
+ * единицах трансляции, иначе драйверы соберутся в stub-режиме. */
+#if defined(ARDUINO) && defined(__has_include)
+#if __has_include("config.h")
+#include "config.h"
+#endif
+#endif
+
+#include <stdint.h>
+#include <stddef.h>
+#include <stdbool.h>
+
+#define KL_MAX_PAYLOAD 200
+#define KL_MAX_PACKET_SIZE 256
+#define KL_MAX_TEXT 160
+
+#define KL_BROADCAST_ID 0xFFFFFFFFu
+#define KL_ANY_GATEWAY_ID 0x00000001u
+#define KL_INVALID_ID 0x00000000u
+
+#define KL_DEFAULT_TTL 10
+#define KL_DEFAULT_GW_HOPS 10
+#define KL_DEFAULT_PRESENCE_MS 30000u
+/* Стационарные узлы (роутеры/шлюзы) шлют телеметрию по Trickle реже. */
+#define KL_DEFAULT_STATION_PRESENCE_MS 120000u
+#define KL_DEFAULT_GW_BEACON_MS 5000u
+#define KL_DEFAULT_ROUTE_EXPIRY_MS 30000u
+#define KL_DEFAULT_ACK_TIMEOUT_MS 4000u
+#define KL_DEFAULT_ACK_RETRIES 4
+
+/* Архитектура чипа для телеметрии и OTA. */
+enum kl_chip_arch_t : uint8_t {
+  KL_CHIP_ESP32 = 1,
+  KL_CHIP_ESP32C3 = 2,
+  KL_CHIP_ESP32S3 = 3,
+  KL_CHIP_ESP32C6 = 4,
+  KL_CHIP_ESP32C5 = 6
+};
+
+/* Битовая маска радио-возможностей в NODE_PRESENCE. */
+enum kl_radio_caps_t : uint8_t {
+  KL_RADIO_LORA = 0x01,
+  KL_RADIO_SX1262 = 0x02,
+  KL_RADIO_SX127X = 0x04,
+  KL_RADIO_BLE = 0x08,
+  KL_RADIO_WIFI_MESH = 0x10
+};
+
+/* Роль узла в телеметрии (клиент/hybrid/роутер/шлюз). */
+enum kl_node_role_t : uint8_t {
+  KL_NODE_CLIENT = 0,
+  KL_NODE_HYBRID = 1,
+  KL_NODE_ROUTER = 2,
+  KL_NODE_GATEWAY = 3
+};
+
+/* Состояние OTA, отображаемое в телеметрии. */
+enum kl_ota_state_t : uint8_t {
+  KL_OTA_IDLE = 0,
+  KL_OTA_DOWNLOADING = 1,
+  KL_OTA_VERIFYING = 2,
+  KL_OTA_PENDING_REBOOT = 3,
+  KL_OTA_FAILED_ROLLBACK = 4
+};
+
+/* Совместимость: старые сборки задавали только KL_USE_LORA. */
+#ifndef KL_HAS_LORA
+#ifdef KL_USE_LORA
+#define KL_HAS_LORA KL_USE_LORA
+#else
+#define KL_HAS_LORA 0
+#endif
+#endif
+#ifndef KL_HAS_BLE
+#define KL_HAS_BLE 0
+#endif
+#ifndef KL_HAS_MQTT
+#define KL_HAS_MQTT 0
+#endif
+#ifndef KL_FIRMWARE_VERSION
+#define KL_FIRMWARE_VERSION "1.4.11"
+#endif
+#ifndef KL_FIRMWARE_BUILD
+#define KL_FIRMWARE_BUILD 1
+#endif
+#ifndef KL_CHIP_ARCH
+#define KL_CHIP_ARCH KL_CHIP_ESP32
+#endif
+
+
+enum kl_role_t : uint8_t {
+  KL_ROLE_CLIENT = 0,  /* носимый: гибридный клиент + ретранслятор + мобильный шлюз */
+  KL_ROLE_ROUTER = 1,  /* стационарный ретранслятор / межсредовой мост */
+  KL_ROLE_GATEWAY = 2  /* стационарный интернет-шлюз */
+};
+
+enum kl_lora_chip_t : uint8_t {
+  KL_LORA_SX1278 = 0,
+  KL_LORA_SX1262 = 1,
+  KL_LORA_SX1276 = 2,
+  KL_LORA_LR2021 = 3
+};
+
+struct kl_lora_config_t {
+  bool present;
+  uint8_t chip;              /* kl_lora_chip_t */
+  int8_t sck;
+  int8_t miso;
+  int8_t mosi;
+  int8_t cs;
+  int8_t rst;
+  int8_t dio0;
+  int8_t dio1;
+  int8_t busy;
+  float freq_mhz;
+  uint8_t sf;
+  float bw_khz;
+  uint8_t cr;
+  uint16_t preamble;
+  int8_t power_dbm;
+  uint8_t sync_word;
+  uint32_t max_airtime_ms_per_min; /* regulatory duty-cycle budget */
+};
+
+struct kl_config_t {
+  kl_role_t role;
+  uint32_t node_id;    /* stable 32-bit id derived from the hardware id */
+  uint32_t gateway_id; /* == node_id when role == GATEWAY              */
+
+  bool espnow_enabled;
+  uint8_t wifi_channel;
+  bool allow_transit_for_client;
+
+  /* Гибридный носимый узел: клиент + умный ретранслятор + мобильный шлюз. */
+  bool hybrid_portable;
+  bool relay_allowed;
+  uint8_t relay_battery_min;
+  uint8_t relay_battery_resume;
+  uint16_t mobile_gw_beacon_ms;
+  uint16_t mobile_gw_ttl_ms;
+  uint8_t mobile_gw_hops;
+  uint16_t relay_penalty_espnow_ms;
+  uint16_t relay_penalty_lora_ms;
+
+  bool lora_present;
+  kl_lora_config_t lora;
+
+  uint8_t ttl;
+  uint8_t gw_max_hops;
+  uint32_t presence_interval_ms;
+  uint32_t station_presence_ms;
+  uint32_t gw_beacon_interval_ms;
+  uint32_t route_expiry_ms;
+  uint32_t ack_timeout_ms;
+  uint8_t ack_retries;
+  uint8_t lora_low_watermark; /* percent: drop LOW when queue above this */
+
+  uint8_t temp_mesh_key[32];
+  bool has_temp_key;
+
+  char hub_url[128];
+  char module_token[80];
+  char hardware_id[24];
+
+  /* Владелец модуля: постоянный user_net_id и 8 hex BLE-префикса UUID. */
+  uint32_t owner_net_id;
+  uint32_t owner_epoch;
+  /* Удалённо настраиваемое железо (NVS «hw», только по подписи владельца). */
+  int8_t batt_pin;          /* -1 — батареи нет */
+  uint16_t batt_ratio_x100; /* коэффициент делителя ×100 */
+  int8_t espnow_dbm;        /* 0 — значение по умолчанию */
+  uint32_t hw_epoch;        /* последняя применённая эпоха настройки */
+  char owner_ble_prefix[9];
+  /* Последние 6 hex MAC — для имени KL-<USER8>-<MOD6>. */
+  char ble_mod6[7];
+  /* Отображаемое имя модуля (карта сети, список модулей). Задаётся при прошивке или через CONFIG. */
+  char display_name[32];
+};
+
+void kl_config_defaults(kl_config_t *cfg);
+bool kl_config_validate(kl_config_t *cfg);
+/** Merge a JSON object over the current config. Unknown keys are ignored. */
+bool kl_config_from_json(kl_config_t *cfg, const char *json);
+size_t kl_config_to_json(const kl_config_t *cfg, char *out, size_t cap);
+/** True when the key is present and not all zeroes. */
+bool kl_config_set_temp_key_hex(kl_config_t *cfg, const char *hex);
+
+/* Минимальный поиск JSON-скаляра для парсера конфигурации и декодера шлюза.
+ * Возвращает указатель на значение (после ':') или nullptr. */
+const char *kl_json_value(const char *json, const char *key);
+bool kl_json_get_string(const char *json, const char *key, char *out, size_t cap);
+bool kl_json_get_uint(const char *json, const char *key, uint32_t *out);
+bool kl_json_get_int(const char *json, const char *key, int32_t *out);
+bool kl_json_get_bool(const char *json, const char *key, bool *out);
+bool kl_json_get_double(const char *json, const char *key, double *out);
+
+#endif  // KLINTO_CONFIG_H
