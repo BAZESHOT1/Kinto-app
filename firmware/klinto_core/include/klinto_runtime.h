@@ -112,6 +112,12 @@ class KlintoNode {
   uint32_t ota_relay_until_ = 0;
   uint32_t gw_channel_check_ms_ = 0;
   int8_t led_pin_ = -1;
+  bool mesh_task_started_ = false;
+  bool client_task_started_ = false;
+  bool gateway_task_started_ = false;
+  void startMeshTask();
+  void startClientTask();
+  void startGatewayTask();
   void seedHw();
   void otaValidateTick(uint32_t now);
 };

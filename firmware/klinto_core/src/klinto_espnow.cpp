@@ -39,7 +39,11 @@ bool EspNowInterface::init(const kl_config_t &cfg) {
   const bool sta_up = WiFi.status() == WL_CONNECTED;
   if (!sta_up) {
     WiFi.mode(WIFI_STA);
-    WiFi.disconnect(false, false);
+    /* Авто-реконнект ядра заставляет драйвер сканировать каналы и перебивает
+     * наш выбор канала соты — ESP-NOW остаётся «глухим». Гасим реконнект и
+     * стираем сохранённый AP. */
+    WiFi.setAutoReconnect(false);
+    WiFi.disconnect(false, true);
     delay(50);
     esp_wifi_set_channel(cfg.wifi_channel, WIFI_SECOND_CHAN_NONE);
   }
@@ -195,7 +199,21 @@ bool EspNowInterface::setChannel(uint8_t wifi_channel) {
   if (wifi_channel < 1 || wifi_channel > 13) return false;
   /* Подключённый к роутеру STA сидит на канале AP — переключать его нельзя. */
   if (WiFi.status() == WL_CONNECTED) return (uint8_t)WiFi.channel() == wifi_channel;
-  return esp_wifi_set_channel(wifi_channel, WIFI_SECOND_CHAN_NONE) == ESP_OK;
+  const esp_err_t err = esp_wifi_set_channel(wifi_channel, WIFI_SECOND_CHAN_NONE);
+  /* Проверяем, что канал реально применился: фоновое сканирование STA или
+   * авто-коннект могут его перебить, и тогда приём ESP-NOW пропадает. */
+  uint8_t primary = 0;
+  wifi_second_chan_t second = WIFI_SECOND_CHAN_NONE;
+  if (esp_wifi_get_channel(&primary, &second) == ESP_OK && primary != wifi_channel) {
+    static uint32_t last_log_ms = 0;
+    if (millis() - last_log_ms > 2000) {
+      last_log_ms = millis();
+      Serial.printf("[espnow] channel %u -> actual %u (err=%d)\n", (unsigned)wifi_channel,
+                    (unsigned)primary, (int)err);
+    }
+    return false;
+  }
+  return err == ESP_OK;
 }
 
 int8_t EspNowInterface::getLinkQuality() const {

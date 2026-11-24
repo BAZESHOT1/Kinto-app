@@ -376,8 +376,14 @@ bool KlintoNode::begin() {
     }
   } else {
     WiFi.mode(WIFI_STA);
-    WiFi.disconnect(false, false);
-    delay(30);
+    /* Носимый узел НЕ должен держать домашний Wi-Fi: ESP-IDF хранит последний AP
+     * в своём NVS, и Arduino-ядро с авто-переподключением начинает сканировать
+     * каналы в фоне. Из-за этого esp_wifi_set_channel не держится, соты
+     * «переключаются» только на бумаге, а ESP-NOW не слышит ни одного кадра.
+     * Отключаем авто-реконнект и стираем сохранённый AP. */
+    WiFi.setAutoReconnect(false);
+    WiFi.disconnect(false, true);
+    delay(50);
     /* C3/C6: BLE и ESP-NOW делят радио. Modem sleep приводил к пропуску
      * GW_BEACON и RREP, из-за чего узел не видел шлюз. Держим радио
      * активным (для носимого модуля важнее стабильность, чем микро-экономия). */
@@ -444,6 +450,10 @@ bool KlintoNode::begin() {
   kl_cell_host_t cell_host = {this, &KlintoNode::cellApplyChannel, &KlintoNode::cellLocked,
                               &KlintoNode::cellOffline, &KlintoNode::cellProbe};
   cell_.init(&cfg_, &cell_host);
+  /* Mesh-задача (маяки/маршрутизация) — ДО инициализации моста/шлюза: даже если
+   * что-то ниже заблокируется, кластер с маяками уже живёт. */
+  Serial.println("[klinto] stage: mesh task");
+  startMeshTask();
   if (cfg_.role == KL_ROLE_GATEWAY) {
     uint8_t channel = cfg_.wifi_channel;
     if (WiFi.status() == WL_CONNECTED) {
@@ -459,6 +469,7 @@ bool KlintoNode::begin() {
   }
 
   /* Client bridge: BLE by default, USB serial for headless/dev boards. */
+  Serial.println("[klinto] stage: link");
   char chosen[16] = "ble";
   if (kl_nvs_get_str("klinto3", "client_link", chosen, sizeof(chosen))) {
     /* already copied */
@@ -495,9 +506,12 @@ bool KlintoNode::begin() {
   kl_bridge_sink_t bridge_sink = {this, &KlintoNode::onConfig, &KlintoNode::onLog,
                                   &KlintoNode::onInetStatus, &KlintoNode::onVerifyOwnerClaim,
                                   &KlintoNode::onOwnerChanged, &KlintoNode::onRemoteConfig};
+  Serial.println("[klinto] stage: bridge");
   bridge_.init(&router_, &cfg_, client_link_, &down_queue_, &bridge_sink);
+  startClientTask();
 
   if (cfg_.role == KL_ROLE_GATEWAY) {
+    Serial.println("[klinto] stage: gateway");
     /* Hub не требует MQTT: REST-транспорт работает всегда и не зависит
      * от наличия брокера. Очередь uplink та же. */
     http_gateway_.init(&cfg_);
@@ -505,6 +519,7 @@ bool KlintoNode::begin() {
                                &KlintoNode::sinkGatewayStatus};
     gateway_.init(&cfg_, &http_gateway_, &up_queue_, &gsink);
     Serial.printf("[klinto] gateway uplink=http hub=%s\n", cfg_.hub_url);
+    startGatewayTask();
   }
 
   startTasks();
@@ -513,6 +528,23 @@ bool KlintoNode::begin() {
 }
 
 void KlintoNode::startTasks() {
+  /* Задачи стартуют по мере готовности: mesh — сразу после роутера/соты (это
+   * маяки и маршрутизация), клиент — после моста, шлюз — после uplink. Так
+   * сбой на поздней инициализации не оставляет кластер без шлюза. */
+  startMeshTask();
+  startClientTask();
+  if (cfg_.role == KL_ROLE_GATEWAY) startGatewayTask();
+}
+
+void KlintoNode::startMeshTask() {
+  if (mesh_task_started_) return;
+  mesh_task_started_ = true;
+  xTaskCreatePinnedToCore(&KlintoNode::meshTaskEntry, "kl_mesh", 8192, this, 5, nullptr, 0);
+}
+
+void KlintoNode::startClientTask() {
+  if (client_task_started_) return;
+  client_task_started_ = true;
   /* ESP32-C3 одноядерный: xTaskCreatePinnedToCore(core=1) роняет assert.
    * На dual-core оставляем mesh на core 0, BLE-клиент на core 1. */
 #if defined(CONFIG_FREERTOS_UNICORE) && CONFIG_FREERTOS_UNICORE
@@ -520,12 +552,14 @@ void KlintoNode::startTasks() {
 #else
   constexpr BaseType_t kClientCore = 1;
 #endif
-  xTaskCreatePinnedToCore(&KlintoNode::meshTaskEntry, "kl_mesh", 8192, this, 5, nullptr, 0);
   xTaskCreatePinnedToCore(&KlintoNode::clientTaskEntry, "kl_client", 8192, this, 3, nullptr,
                           kClientCore);
-  if (cfg_.role == KL_ROLE_GATEWAY) {
-    xTaskCreatePinnedToCore(&KlintoNode::gatewayTaskEntry, "kl_gateway", 16384, this, 2, nullptr, 0);
-  }
+}
+
+void KlintoNode::startGatewayTask() {
+  if (gateway_task_started_) return;
+  gateway_task_started_ = true;
+  xTaskCreatePinnedToCore(&KlintoNode::gatewayTaskEntry, "kl_gateway", 16384, this, 2, nullptr, 0);
 }
 
 void KlintoNode::loop() {
@@ -672,8 +706,13 @@ bool KlintoNode::cellApplyChannel(void *ctx, uint8_t wifi_channel) {
   if (self->cfg_.espnow_enabled) self->espnow_.setChannel(wifi_channel);
   if (self->cfg_.lora_present) self->lora_.setChannel(wifi_channel);
   self->router_.on_channel_changed(wifi_channel);
-  Serial.printf("[klinto] radio cell: wifi=%u lora=%.3f MHz sync=0x%02X\n",
-                (unsigned)wifi_channel, (double)self->cfg_.lora.freq_mhz,
+  /* Диагностика: показываем РЕАЛЬНЫЙ канал радио (его может перебить фоновое
+   * сканирование STA — тогда ESP-NOW глухой, хотя «сота» формально переключилась). */
+  uint8_t actual = 0;
+  wifi_second_chan_t second = WIFI_SECOND_CHAN_NONE;
+  if (esp_wifi_get_channel(&actual, &second) != ESP_OK) actual = 0;
+  Serial.printf("[klinto] radio cell: wifi=%u act=%u lora=%.3f MHz sync=0x%02X\n",
+                (unsigned)wifi_channel, (unsigned)actual, (double)self->cfg_.lora.freq_mhz,
                 (unsigned)self->cfg_.lora.sync_word);
   return true;
 }
