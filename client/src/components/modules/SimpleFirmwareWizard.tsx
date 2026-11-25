@@ -233,11 +233,15 @@ export function SimpleFirmwareWizard({
       } catch (error) {
         if (cancelled) return;
         buildErrorCountRef.current += 1;
-        if (buildErrorCountRef.current >= 5) {
-          setBuildError(
-            `Не удаётся получить статус сборки: ${error instanceof Error ? error.message : String(error)}. Нажмите «Повторить».`,
-          );
+        // 502/503/504 — транзиентный ответ прокси/HAProxy при переключении лидера БД.
+        // Не помечаем сборку проваленной: продолжаем опрос до честного 15-минутного таймаута.
+        const message = error instanceof Error ? error.message : String(error);
+        const transient = /\(50[234]\)|502|503|504|temporarily|временно/.test(message);
+        if (!transient && buildErrorCountRef.current >= 5) {
+          setBuildError(`Не удаётся получить статус сборки: ${message}. Нажмите «Повторить».`);
           setBuild((prev) => (prev ? { ...prev, status: 'failed' } : prev));
+        } else if (transient) {
+          setBuildError('Сборка продолжается — сервер статуса временно недоступен, повторяем опрос…');
         }
       }
     };
