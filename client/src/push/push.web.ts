@@ -58,20 +58,32 @@ function openChatFromData(data: Record<string, string> | undefined): void {
 }
 
 /**
+ * Запрос разрешения ДОЛЖЕН быть первым async-вызовом в обработчике жеста,
+ * иначе Safari/Chrome теряют user activation и диалог не появляется.
+ */
+export async function requestWebPushPermission(): Promise<NotificationPermission | 'unsupported'> {
+  if (!isWebPushSupported()) return 'unsupported';
+  if (Notification.permission !== 'default') return Notification.permission;
+  // Вызов должен произойти синхронно в жесте пользователя (б await до него).
+  return Notification.requestPermission();
+}
+
+/**
  * Просит разрешение на уведомления при первом посещении (если ещё не решено)
  * и заранее регистрирует service worker. Безопасно вызывать без сессии.
  */
 export async function ensureWebPushPermission(): Promise<NotificationPermission | 'unsupported'> {
   if (!isWebPushSupported()) return 'unsupported';
+  // Сначала синхронный запрос (сохраняем жест пользователя), потом SW.
+  const permission = await requestWebPushPermission();
+  if (permission === 'unsupported' || permission === 'denied') return permission;
   try {
-    // SW регистрируем до запроса, чтобы браузер связывал разрешение с worker.
     await navigator.serviceWorker.register(KL_PATH).catch(() => undefined);
     await navigator.serviceWorker.ready.catch(() => undefined);
-    if (Notification.permission !== 'default') return Notification.permission;
-    return await Notification.requestPermission();
   } catch {
-    return Notification.permission;
+    /* service worker может быть недоступен — разрешение уже получено */
   }
+  return permission;
 }
 
 /**
@@ -116,7 +128,7 @@ export async function registerWebPush(
 
     const permission =
       Notification.permission === 'default'
-        ? await Notification.requestPermission()
+        ? await requestWebPushPermission()
         : Notification.permission;
     if (permission !== 'granted') return noop;
 

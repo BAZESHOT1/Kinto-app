@@ -30,7 +30,11 @@ enum kl_rpc_op_t : uint8_t {
   KL_RPC_SEND_ENVELOPE = 0x0E,
   KL_RPC_MSG_RECEIPT = 0x22,
   /* Подписанная владельцем настройка железа узла: [epoch u32][sig_len u8][sig][p ASCII]. */
-  KL_RPC_NODE_CONFIG = 0x30
+  KL_RPC_NODE_CONFIG = 0x30,
+  /** Аудиокадр Opus по E-kMesh: [0x31][room_len u8][room][seq u16][opus]. */
+  KL_RPC_AUDIO_FRAME = 0x31,
+  /** Микшированный аудиокадр из Hub в приложение: [0x32][seq u16][opus]. */
+  KL_RPC_AUDIO_DOWN = 0x32
 };
 
 enum kl_search_type_t : uint8_t {

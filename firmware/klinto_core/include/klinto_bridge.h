@@ -35,7 +35,9 @@ enum kl_client_frame_t : uint8_t {
   KL_CF_PROXY_DOWN = 12,
   KL_CF_INET_STATUS = 13,
   KL_CF_SET_OWNER = 14,
-  KL_CF_SET_OWNER_LOCAL = 15
+  KL_CF_SET_OWNER_LOCAL = 15,
+  /** Микшированный Opus-кадр от узла (E-kMesh звонок). */
+  KL_CF_AUDIO_DOWN = 16
 };
 
 enum kl_client_flags_t : uint8_t {

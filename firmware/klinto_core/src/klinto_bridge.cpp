@@ -625,6 +625,14 @@ void KlintoClientBridge::deliver_mesh_reassembled(const kl_packet_t *pkt) {
     uint8_t op = 0, rflags = 0;
     uint16_t chat = KL_CODEC_NO_CHAT;
     if (!kl_codec_peek(plain, plain_len, &op, &rflags, &chat)) return;
+    if (op == KL_RPC_AUDIO_DOWN) {
+      /* Микс Hub → приложение: полезная нагрузка уже [seq u16][opus]. */
+      if (plain_len > KL_RPC_HEADER_SIZE) {
+        send_frame(KL_CF_AUDIO_DOWN, plain + KL_RPC_HEADER_SIZE,
+                   plain_len - KL_RPC_HEADER_SIZE, KL_CF_FLAG_URGENT);
+      }
+      return;
+    }
     if (op == KL_RPC_NODE_CONFIG) {
       if (sink_.remote_config && plain_len > KL_RPC_HEADER_SIZE) {
         sink_.remote_config(sink_.ctx, plain + KL_RPC_HEADER_SIZE, plain_len - KL_RPC_HEADER_SIZE);

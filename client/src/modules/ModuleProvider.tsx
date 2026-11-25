@@ -28,7 +28,7 @@ import { KMeshV1Client, messageRefForMsgUuid } from '../kmesh/v1/client';
 import { peekServerChatKey, storeServerChatKey } from '../data/chatkit';
 import { loadCachedMessages, saveMessages } from '../data/cache';
 import { crc16 } from '../kmesh/v1/protocol';
-import { emitKmeshFeed, emitKmeshHistory, emitKmeshSearch } from '../kmesh/v1/events';
+import { emitKmeshFeed, emitKmeshHistory, emitKmeshSearch, emitKmeshAudio } from '../kmesh/v1/events';
 import { setActiveKMeshV1 } from '../kmesh/v1/runtime';
 import { startMobileGateway, type MobileGatewayHandle } from '../kmesh/v1/mobileGateway';
 import { startMeshForegroundService, stopMeshForegroundService } from './background';
@@ -472,6 +472,7 @@ export function ModuleProvider({ children }: { children: React.ReactNode }) {
             void storeServerChatKey(chatId, version, key).catch(() => undefined);
           },
           onFeed: (entries, more) => emitKmeshFeed({ entries, more }),
+          onAudioFrame: (frame) => emitKmeshAudio(frame),
           onHistory: (chatRef, messages, more) => emitKmeshHistory({ chatRef, messages, more }),
           onReceipt: (chatRef, entries) => {
             const chatId = resolveChat(chatRef);

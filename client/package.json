@@ -58,6 +58,7 @@
     "react-native-background-fetch": "^4.2.5",
     "react-native-ble-plx": "^3.5.1",
     "react-native-webrtc": "155.0.1",
+    "opusscript": "^0.1.1",
     "react-native-gesture-handler": "~2.20",
     "react-native-get-random-values": "~1.11.0",
     "react-native-keyboard-controller": "1.15.2",

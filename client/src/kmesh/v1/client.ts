@@ -118,6 +118,8 @@ export interface KMeshV1ClientOptions {
   onHistory?: (chatRef: number, messages: HistoryEntry[], more: boolean) => void;
   /** Короткая квитанция от собеседника (доставлено/прочитано) через kMesh. */
   onReceipt?: (chatRef: number, entries: ReceiptEntry[]) => void;
+  /** Микшированный Opus-кадр E-kMesh звонка: [seq u16][opus]. */
+  onAudioFrame?: (frame: Uint8Array) => void;
   /** Прогресс записи кадра в BLE: байты и привязка к сообщению. */
   onSendProgress?: (event: {
     msgUuid: string;
@@ -261,6 +263,19 @@ export class KMeshV1Client {
 
   async search(reqId: number, query: string, searchType: number): Promise<boolean> {
     return this.sendServiceRpc(encodeSearchRequest(reqId, searchType, query));
+  }
+
+  /** Opus-кадр по E-kMesh: [0x31][room_len][room][seq][opus] → шлюз → Hub → MCU. */
+  sendAudioFrame(roomId: string, seq: number, opus: Uint8Array): Promise<boolean> {
+    const room = new TextEncoder().encode(roomId);
+    const rpc = new Uint8Array(1 + 1 + room.length + 2 + opus.length);
+    rpc[0] = 0x31;
+    rpc[1] = room.length;
+    rpc.set(room, 2);
+    new DataView(rpc.buffer).setUint16(2 + room.length, seq & 0xffff, true);
+    rpc.set(opus, 4 + room.length);
+    const up = encodeRpcUp(ANY_GATEWAY_ID, PacketFlag.TO_INTERNET, 0n, rpc);
+    return this.link.send(encodeClientFrame(ClientFrameType.RPC_UP, up, this.seq++));
   }
 
   async syncFeed(lastSyncTs: number): Promise<boolean> {
@@ -821,6 +836,10 @@ export class KMeshV1Client {
           } catch {
             /* битый лог не критичен */
           }
+          break;
+        }
+        case ClientFrameType.AUDIO_DOWN: {
+          this.opts.onAudioFrame?.(frame.payload);
           break;
         }
         case ClientFrameType.RPC_DOWN: {

@@ -3,7 +3,7 @@
  * и управление приглушёнными чатами. Настройки хранятся на устройстве (kv).
  */
 import React from 'react';
-import { DeviceEventEmitter, Platform, Text, View } from 'react-native';
+import { DeviceEventEmitter, Platform, Pressable, Text, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '../../../src/theme/useTheme';
 import { useIsWide } from '../../../src/theme/useIsWide';
@@ -19,6 +19,7 @@ import { useChats } from '../../../src/data/queries';
 import { api } from '../../../src/data/api';
 import { kv } from '../../../src/crypto/storage';
 import { useStore } from '../../../src/state/useStore';
+import { ensureWebPushPermission, requestWebPushPermission } from '../../../src/push';
 
 /** Читает булеву настройку из localStorage/AsyncStorage. */
 function useStoredToggle(
@@ -82,6 +83,17 @@ export default function NotificationsScreen() {
     'sg-notify-hide-content-changed',
     false,
   );
+  const [pushStatus, setPushStatus] = React.useState<string>('не запрошено');
+  React.useEffect(() => {
+    if (Platform.OS !== 'web' || typeof Notification === 'undefined') return;
+    setPushStatus(Notification.permission);
+  }, []);
+  const enableWebPush = React.useCallback(() => {
+    void requestWebPushPermission().then((permission) => {
+      setPushStatus(permission === 'unsupported' ? 'unsupported' : permission);
+      if (permission === 'granted') void ensureWebPushPermission().catch(() => undefined);
+    }).catch(() => undefined);
+  }, []);
 
   const changeHideContent = React.useCallback(
     (value: boolean) => {
@@ -135,6 +147,14 @@ export default function NotificationsScreen() {
       {/* ------------------------------------------------ push-контент ----- */}
       <SettingsSection title="Push-уведомления" delay={30}>
         <GlassCard>
+          {Platform.OS === 'web' ? (
+            <SettingsRow
+              icon="notifications-outline"
+              title="Включить уведомления в браузере"
+              subtitle={`Статус: ${pushStatus}. На iOS добавить Kinto на главный экран (PWA).`}
+              onPress={enableWebPush}
+            />
+          ) : null}
           <SettingsToggle
             icon="eye-off-outline"
             title="Скрывать отправителя и текст"

@@ -8,7 +8,7 @@
 
 export const PACKET_MAGIC = 0xa7;
 export const PACKET_VERSION = 3;
-export const PACKET_HEADER_SIZE = 35;
+export const PACKET_HEADER_SIZE = 37; // + frag_index/frag_total
 export const MAX_PAYLOAD = 200;
 export const MAX_PACKET_SIZE = 256;
 export const BROADCAST_ID = 0xffffffff;
@@ -156,6 +156,8 @@ export const ClientFrameType = {
   INET_STATUS: 13,
   SET_OWNER: 14,
   SET_OWNER_LOCAL: 15,
+  /** Микшированный Opus-кадр по E-kMesh звонку. */
+  AUDIO_DOWN: 16,
 } as const;
 
 export const CLIENT_MAGIC = [0x53, 0x47] as const;

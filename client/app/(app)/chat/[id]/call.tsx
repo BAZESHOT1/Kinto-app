@@ -10,6 +10,7 @@ import { useLocalSearchParams } from 'expo-router';
 import { useTheme } from '../../../../src/theme/useTheme';
 import { api } from '../../../../src/data/api';
 import { createOffer, type CallChannel, type CallSession } from '../../../../src/call';
+import { startMeshAudio } from '../../../../src/call/meshAudio.web';
 import { useStore } from '../../../../src/state/useStore';
 import { useModuleConnection } from '../../../../src/modules/ModuleProvider';
 
@@ -34,6 +35,7 @@ export default function CallScreen() {
   const [quality, setQuality] = React.useState<'good' | 'poor'>('good');
   const [history, setHistory] = React.useState<Array<{ id: string; startedAt: number; durationMs: number }>>([]);
   const sessionRef = React.useRef<CallSession | null>(null);
+  const meshAudioRef = React.useRef<{ stop: () => void } | null>(null);
   const callIdRef = React.useRef('');
   const startedRef = React.useRef(0);
   const [seconds, setSeconds] = React.useState(0);
@@ -61,6 +63,8 @@ export default function CallScreen() {
   const finish = React.useCallback(async (callId: string) => {
     sessionRef.current?.stop();
     sessionRef.current = null;
+    meshAudioRef.current?.stop();
+    meshAudioRef.current = null;
     setPhase('ended');
     try {
       const r = await api.callEnd(callId);
@@ -90,12 +94,17 @@ export default function CallScreen() {
         e2eKey,
         quality: channel === 'l-kmesh' ? 'good' : undefined,
       });
-      const result = await createOffer(channel, (sdp) => api.callJoin(started.callId, sdp).then((r) => r.sdp));
-      sessionRef.current = result.session;
+      if (channel === 'internet') {
+        const result = await createOffer(channel, (sdp) => api.callJoin(started.callId, sdp).then((r) => r.sdp));
+        sessionRef.current = result.session;
+      } else {
+        // E-kMesh: сигналинг уже прошёл через kMesh; аудио идёт Opus-кадрами по kMesh.
+        meshAudioRef.current = await startMeshAudio(started.roomId);
+      }
       callIdRef.current = started.callId;
       startedRef.current = Date.now();
       setPhase('active');
-      const st = await result.session.stats();
+      const st = sessionRef.current ? await sessionRef.current.stats() : { quality: 'good' as const };
       setQuality(st.quality);
       pushToast({ kind: 'info', message: `Звонок начат · ${LABEL[channel]}` });
     } catch (e) {

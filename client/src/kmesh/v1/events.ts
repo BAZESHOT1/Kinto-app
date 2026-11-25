@@ -6,6 +6,9 @@
  */
 import type { FeedEntry, HistoryEntry, SearchResult } from './protocol';
 
+export { emitKmeshAudio, onKmeshAudio } from './audioEvents';
+
+
 type SearchEvent = { reqId: number; results: SearchResult[]; more: boolean };
 type FeedEvent = { entries: FeedEntry[]; more: boolean };
 type HistoryEvent = { chatRef: number; messages: HistoryEntry[]; more: boolean };

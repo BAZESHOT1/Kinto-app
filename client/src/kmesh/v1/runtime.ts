@@ -52,6 +52,13 @@ export async function requestKmeshFeed(lastSyncTs: number): Promise<boolean> {
   return withRetry((client) => client.syncFeed(lastSyncTs >>> 0));
 }
 
+/** Opus-кадр звонка по E-kMesh (только при отсутствии интернета). */
+export function sendKmeshAudio(roomId: string, seq: number, opus: Uint8Array): boolean {
+  if (!active) return false;
+  void active.sendAudioFrame(roomId, seq, opus).catch(() => false);
+  return true;
+}
+
 export async function requestKmeshHistory(chatRef: number, limit = 8): Promise<boolean> {
   if (!active) return false;
   return withRetry((client) => client.chatHistory(chatRef, 0n, limit));

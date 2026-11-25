@@ -42,7 +42,7 @@ import { kv } from '../src/crypto/storage';
 import { api, apiBase, ensureAccessToken, getSession, setSession, initSession, wsUrl, wsFallbackUrl, type Envelope } from '../src/data/api';
 import { applyServerPreferences, initPreferenceSync } from '../src/data/preferences';
 import { loadCaches, loadProfileCaches, preloadMessageCaches, getCachedMe, getCachedChatPreviews, findCachedChat } from '../src/data/cache';
-import { ensureWebPushPermission, initPush } from '../src/push';
+import { ensureWebPushPermission, initPush, requestWebPushPermission } from '../src/push';
 import { showMeshLocalNotification } from '../src/push/local';
 import { startNetworkStateMonitor } from '../src/mesh/NetworkStateMonitor';
 import { flushSignedOfflineBatch } from '../src/mesh/OfflineSyncService';
@@ -1092,6 +1092,16 @@ export default function RootLayout() {
         cleanup();
         return;
       }
+      void requestWebPushPermission().then((permission) => {
+        if (permission === 'unsupported' || permission === 'denied') {
+          done = true;
+          cleanup();
+        } else if (permission === 'granted') {
+          done = true;
+          void ensureWebPushPermission().catch(() => undefined);
+          cleanup();
+        }
+      }).catch(() => undefined);
       void ensureWebPushPermission().catch(() => undefined);
     };
     const cleanup = () => {

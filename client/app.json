@@ -19,7 +19,7 @@
       "favicon": "./assets/favicon.png"
     },
     "plugins": [
-      "expo-router",
+      ["expo-router", { "origin": "https://kintoapp.xyz" }],
       [
         "expo-splash-screen",
         {
@@ -83,7 +83,7 @@
       "buildNumber": "11085",
       "googleServicesFile": "./GoogleService-Info.plist",
       "entitlements": {
-        "aps-environment": "development"
+        "aps-environment": "production"
       },
       "infoPlist": {
         "NSBluetoothAlwaysUsageDescription": "Kinto подключается к модулям связи по Bluetooth для работы mesh-сети.",
