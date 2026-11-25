@@ -1731,6 +1731,11 @@ export const api = {
       method: 'POST',
       body: '{}',
     }),
+  callPermission: (chatId: string, userId: string, allow: boolean) =>
+    req<{ ok: true; canStartCalls: boolean }>('/v1/calls/permissions', {
+      method: 'POST',
+      body: JSON.stringify({ chatId, userId, allow }),
+    }),
   callHistory: (chatId?: string, limit = 50) =>
     req<{
       ok: true;

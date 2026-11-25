@@ -1,7 +1,7 @@
 /**
  * Личные и групповые аудиозвонки Kinto.
- * Сигналинг — Hub (/v1/calls), медиа — встроенное MCU-ядро WebRTC/Opus.
- * E2E-ключ генерируется на устройстве и известен только участникам.
+ * Канал выбирается автоматически: интернет, при отсутствии — kMesh через носимый модуль.
+ * Сигналинг — Hub (/v1/calls), медиа — PCM-микшер Go/Pion с E2E-ключом.
  */
 import React from 'react';
 import { Pressable, ScrollView, Text, View } from 'react-native';
@@ -11,21 +11,24 @@ import { useTheme } from '../../../../src/theme/useTheme';
 import { api } from '../../../../src/data/api';
 import { createOffer, type CallChannel, type CallSession } from '../../../../src/call';
 import { useStore } from '../../../../src/state/useStore';
+import { useModuleConnection } from '../../../../src/modules/ModuleProvider';
 
 type Phase = 'idle' | 'connecting' | 'active' | 'ended';
 
-const CHANNELS: Array<{ id: CallChannel; label: string; note: string }> = [
-  { id: 'internet', label: 'Интернет', note: 'Opus 24–32 kbps' },
-  { id: 'e-kmesh', label: 'E-kMesh', note: 'ESP-NOW, 16–24 kbps' },
-  { id: 'l-kmesh', label: 'L-kMesh', note: 'LoRa, 3–12 kbps (только при хорошем канале)' },
-];
+const LABEL: Record<CallChannel, string> = {
+  internet: 'Интернет · Opus 24–32 kbps',
+  'e-kmesh': 'E-kMesh · ESP-NOW 16–24 kbps',
+  'l-kmesh': 'L-kMesh · LoRa 3–12 kbps',
+};
 
 export default function CallScreen() {
-  const params = useLocalSearchParams<{ id?: string; callId?: string }>();
+  const params = useLocalSearchParams<{ id?: string; type?: string }>();
   const chatId = String(params.id ?? '');
+  const chatType = String(params.type ?? '');
   const theme = useTheme();
   const pushToast = useStore((s) => s.pushToast);
-  const [channel, setChannel] = React.useState<CallChannel>('internet');
+  const transportOnline = useStore((s) => s.transportOnline);
+  const { info, connected } = useModuleConnection();
   const [phase, setPhase] = React.useState<Phase>('idle');
   const [muted, setMuted] = React.useState(false);
   const [quality, setQuality] = React.useState<'good' | 'poor'>('good');
@@ -34,6 +37,12 @@ export default function CallScreen() {
   const callIdRef = React.useRef('');
   const startedRef = React.useRef(0);
   const [seconds, setSeconds] = React.useState(0);
+
+  // Канал по умолчанию: интернет; без интернета — kMesh через носимый модуль.
+  const channel: CallChannel = transportOnline
+    ? 'internet'
+    : (Number(info?.hw?.lb ?? 0) > 0 ? 'l-kmesh' : 'e-kmesh');
+  const meshAvailable = transportOnline || (connected && Boolean(info?.gateway));
 
   React.useEffect(() => {
     let mounted = true;
@@ -60,6 +69,14 @@ export default function CallScreen() {
   }, []);
 
   const start = React.useCallback(async () => {
+    if (chatType === 'channel') {
+      pushToast({ kind: 'error', message: 'Звонки в каналах недоступны' });
+      return;
+    }
+    if (!meshAvailable) {
+      pushToast({ kind: 'error', message: 'Нет интернета и доступа к Hub через носимый модуль' });
+      return;
+    }
     setPhase('connecting');
     try {
       const keyBytes = new Uint8Array(32);
@@ -68,7 +85,7 @@ export default function CallScreen() {
       const e2eKey = btoa(String.fromCharCode(...keyBytes));
       const started = await api.callStart({
         chatId: chatId || undefined,
-        kind: 'group',
+        kind: chatId ? 'group' : 'direct',
         channel,
         e2eKey,
         quality: channel === 'l-kmesh' ? 'good' : undefined,
@@ -80,12 +97,13 @@ export default function CallScreen() {
       setPhase('active');
       const st = await result.session.stats();
       setQuality(st.quality);
-      pushToast({ kind: 'info', message: `Звонок начат · ${channel === 'l-kmesh' ? 'L-kMesh' : channel === 'e-kmesh' ? 'E-kMesh' : 'Интернет'}` });
+      pushToast({ kind: 'info', message: `Звонок начат · ${LABEL[channel]}` });
     } catch (e) {
       setPhase('ended');
-      pushToast({ kind: 'error', message: `Не удалось начать звонок: ${String(e)}` });
+      const msg = String(e);
+      pushToast({ kind: 'error', message: msg.includes('permission') ? 'Нет права создавать звонки в этой группе' : `Не удалось начать звонок: ${msg}` });
     }
-  }, [channel, chatId, pushToast]);
+  }, [chatType, meshAvailable, chatId, channel, pushToast]);
 
   const toggleMute = React.useCallback(() => {
     const next = !muted;
@@ -95,28 +113,28 @@ export default function CallScreen() {
 
   const fmt = (sec: number) => `${String(Math.floor(sec / 60)).padStart(2, '0')}:${String(sec % 60).padStart(2, '0')}`;
 
+  if (chatType === 'channel') {
+    return (
+      <ScrollView style={{ flex: 1, backgroundColor: theme.background }} contentContainerStyle={{ padding: 20 }}>
+        <Text style={{ color: theme.textPrimary, fontSize: 18, fontWeight: '700' }}>Звонки в каналах недоступны</Text>
+        <Text style={{ color: theme.textPrimaryDisabled, fontSize: 13, marginTop: 8 }}>
+          Аудиозвонки работают в личных сообщениях и группах.
+        </Text>
+      </ScrollView>
+    );
+  }
+
   return (
     <ScrollView style={{ flex: 1, backgroundColor: theme.background }} contentContainerStyle={{ padding: 20 }}>
       <Text style={{ color: theme.textPrimary, fontSize: 20, fontWeight: '700', marginBottom: 6 }}>Аудиозвонок</Text>
       <Text style={{ color: theme.textPrimaryDisabled, fontSize: 12, marginBottom: 18 }}>
-        Личный и групповой · до 8 участников · E2E-шифрование
+        {LABEL[channel]} · до 8 участников · E2E-шифрование
       </Text>
-
-      <Text style={{ color: theme.textPrimary, fontWeight: '700', marginBottom: 8 }}>Канал</Text>
-      {CHANNELS.map((c) => (
-        <Pressable
-          key={c.id}
-          onPress={() => setChannel(c.id)}
-          style={{
-            padding: 14, borderRadius: 12, marginBottom: 8,
-            backgroundColor: channel === c.id ? theme.accentSoft : theme.surface,
-            borderWidth: 1, borderColor: channel === c.id ? theme.accent : theme.line,
-          }}
-        >
-          <Text style={{ color: theme.textPrimary, fontWeight: '600' }}>{c.label}</Text>
-          <Text style={{ color: theme.textPrimaryDisabled, fontSize: 11 }}>{c.note}</Text>
-        </Pressable>
-      ))}
+      {!transportOnline ? (
+        <Text style={{ color: theme.textPrimaryDisabled, fontSize: 12, marginBottom: 12 }}>
+          Интернет недоступен — сигналинг идёт через kMesh и носимый модуль. Медиа доставляется через Hub.
+        </Text>
+      ) : null}
 
       {phase === 'active' ? (
         <View style={{ marginTop: 22, alignItems: 'center' }}>
@@ -136,7 +154,7 @@ export default function CallScreen() {
       ) : (
         <Pressable
           onPress={() => void start()}
-          disabled={phase === 'connecting'}
+          disabled={phase === 'connecting' || !meshAvailable}
           style={{ marginTop: 22, padding: 16, borderRadius: 12, alignItems: 'center', backgroundColor: theme.accent }}
         >
           <Text style={{ color: '#fff', fontWeight: '700' }}>
