@@ -91,6 +91,15 @@ function ChatInfoScreen({ forcedId }: { forcedId?: string } = {}) {
   const [notMember, setNotMember] = React.useState(false);
   const [joinBusy, setJoinBusy] = React.useState(false);
   const [joinPending, setJoinPending] = React.useState(false);
+  const [canStartCall, setCanStartCall] = React.useState(false);
+
+  React.useEffect(() => {
+    let alive = true;
+    void api.callCanStart(chatId).then((r) => {
+      if (alive) setCanStartCall(r.canStart);
+    }).catch(() => undefined);
+    return () => { alive = false; };
+  }, [chatId]);
 
   const createChat = useCreateChat();
   const leaveChat = useLeaveChat();
@@ -603,6 +612,22 @@ function ChatInfoScreen({ forcedId }: { forcedId?: string } = {}) {
           ) : null}
 
           <InfoQuickActions actions={quickActions} />
+
+          {canStartCall ? (
+            <Pressable
+              onPress={() => router.push(`/chat/${chatId}/call?type=${type || ''}&autoStart=1` as never)}
+              style={{
+                marginTop: 10, padding: 14, borderRadius: 12,
+                flexDirection: 'row', alignItems: 'center', gap: 10,
+                backgroundColor: theme.accentSoft, borderWidth: 1, borderColor: theme.accent,
+              }}
+            >
+              <Ionicons name="call" size={20} color={theme.accent} />
+              <Text style={{ color: theme.accent, fontWeight: '700' }}>
+                {type === 'direct' ? 'Позвонить' : 'Начать групповой звонок'}
+              </Text>
+            </Pressable>
+          ) : null}
 
           {pinned ? (
             <PinnedCard text={pinnedText} username={pinned.senderUsername} loading={unpinLoading} onUnpin={() => void unpin()} />

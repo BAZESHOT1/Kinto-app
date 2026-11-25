@@ -175,6 +175,27 @@ function ChatScreen({ forcedId }: { forcedId?: string } = {}) {
   const [sheetMessage, setSheetMessage] = useState<ViewMessage | null>(null);
   const [reactionTarget, setReactionTarget] = useState<ViewMessage | null>(null);
   const [menuOpen, setMenuOpen] = useState(false);
+  const [activeCall, setActiveCall] = useState<{
+    id: string; startedAt: number; durationMs: number; participants: number;
+  } | null>(null);
+  const [callTick, setCallTick] = useState(0);
+
+  useEffect(() => {
+    if (!chatId) return undefined;
+    let alive = true;
+    const load = () => {
+      void api.callActive(chatId).then((r) => {
+        if (alive) setActiveCall(r.call ? {
+          id: r.call.id, startedAt: r.call.startedAt,
+          durationMs: r.call.durationMs, participants: r.call.participants,
+        } : null);
+      }).catch(() => undefined);
+    };
+    load();
+    const t = setInterval(load, 3000);
+    const timer = setInterval(() => setCallTick((v) => v + 1), 1000);
+    return () => { alive = false; clearInterval(t); clearInterval(timer); };
+  }, [chatId]);
   const [searchOpen, setSearchOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [matchIndex, setMatchIndex] = useState(-1);
@@ -1908,8 +1929,20 @@ function ChatScreen({ forcedId }: { forcedId?: string } = {}) {
           avatar={chat?.type === 'direct' ? peerPresence?.avatar ?? null : chat?.avatar ?? null}
           chatType={chat?.type}
           membersCount={chat?.membersCount}
-          onCall={chat?.type === 'channel' ? undefined : () => router.push(`/chat/${chatId}/call?type=${chat?.type ?? ''}` as never)}
         />
+
+        {activeCall ? (
+          <View style={{
+            flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+            paddingHorizontal: 14, paddingVertical: 8, marginHorizontal: 12, marginTop: 4,
+            borderRadius: 12, backgroundColor: theme.accentSoft,
+          }}>
+            <Text style={{ color: theme.accent, fontWeight: '700' }}>
+              Звонок · {String(Math.floor(Math.max(0, Date.now() - activeCall.startedAt) / 60000)).padStart(2, '0')}:{String(Math.floor((Math.max(0, Date.now() - activeCall.startedAt) % 60000) / 1000)).padStart(2, '0')}
+            </Text>
+            <Text style={{ color: theme.accent, fontSize: 11 }}>{activeCall.participants} уч.</Text>
+          </View>
+        ) : null}
 
         {secret ? <SecretBanner /> : null}
 

@@ -23,9 +23,10 @@ const LABEL: Record<CallChannel, string> = {
 };
 
 export default function CallScreen() {
-  const params = useLocalSearchParams<{ id?: string; type?: string }>();
+  const params = useLocalSearchParams<{ id?: string; type?: string; autoStart?: string }>();
   const chatId = String(params.id ?? '');
   const chatType = String(params.type ?? '');
+  const autoStart = params.autoStart === '1';
   const theme = useTheme();
   const pushToast = useStore((s) => s.pushToast);
   const transportOnline = useStore((s) => s.transportOnline);
@@ -114,6 +115,14 @@ export default function CallScreen() {
     }
   }, [chatType, meshAvailable, chatId, channel, pushToast]);
 
+  React.useEffect(() => {
+    if (autoStart && phase === 'idle') {
+      const t = setTimeout(() => void start(), 0);
+      return () => clearTimeout(t);
+    }
+    return undefined;
+  }, [autoStart, phase, start]);
+
   const toggleMute = React.useCallback(() => {
     const next = !muted;
     sessionRef.current?.setMuted(next);
@@ -161,15 +170,12 @@ export default function CallScreen() {
           </View>
         </View>
       ) : (
-        <Pressable
-          onPress={() => void start()}
-          disabled={phase === 'connecting' || !meshAvailable}
-          style={{ marginTop: 22, padding: 16, borderRadius: 12, alignItems: 'center', backgroundColor: theme.accent }}
-        >
-          <Text style={{ color: '#fff', fontWeight: '700' }}>
-            {phase === 'connecting' ? 'Подключение…' : 'Начать звонок'}
-          </Text>
-        </Pressable>
+      {phase === 'connecting' ? (
+        <Text style={{ color: theme.textSecondary, marginTop: 20 }}>Подключение…</Text>
+      ) : null}
+      {phase === 'ended' ? (
+        <Text style={{ color: theme.textSecondary, marginTop: 20 }}>Звонок завершён</Text>
+      ) : null}
       )}
 
       {history.length > 0 ? (

@@ -1736,6 +1736,13 @@ export const api = {
       method: 'POST',
       body: JSON.stringify({ chatId, userId, allow }),
     }),
+  callCanStart: (chatId: string) =>
+    req<{ ok: true; canStart: boolean }>(`/v1/calls/can-start?chatId=${encodeURIComponent(chatId)}`),
+  callActive: (chatId: string) =>
+    req<{
+      ok: true;
+      call: { id: string; chatId: string | null; startedAt: number; durationMs: number; participants: number } | null;
+    }>(`/v1/calls/active?chatId=${encodeURIComponent(chatId)}`),
   callHistory: (chatId?: string, limit = 50) =>
     req<{
       ok: true;

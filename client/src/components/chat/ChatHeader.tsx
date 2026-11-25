@@ -87,7 +87,6 @@ export function ChatHeader({
   onMenu,
   onOpenInfo,
   onSearch,
-  onCall,
   onAvatarPress,
   avatarRef,
   hideAvatar,
@@ -113,8 +112,6 @@ export function ChatHeader({
   onOpenInfo?: () => void;
   /** Удержание на названии: поиск по чату (как в Telegram). */
   onSearch?: () => void;
-  /** Начать аудиозвонок (личный/групповой). */
-  onCall?: () => void;
   /** Тап по фото: профиль собеседника (личный чат) или информация о чате. */
   onAvatarPress?: () => void;
   avatarRef: React.RefObject<View | null>;
@@ -254,19 +251,6 @@ export function ChatHeader({
           </Glass>
         </PressableScale>
 
-
-        <PressableScale
-          pressedScale={0.92}
-          onPress={onCall}
-          disabled={!onCall}
-          accessibilityRole="button"
-          accessibilityLabel="Аудиозвонок"
-          hitSlop={6}
-        >
-          <Glass radius={wide ? 23 : 28} fill={GLASS_FILL_BUTTON} style={[styles.round, wide && { width: 46, height: 46 }]}>
-            <Ionicons name="call" size={wide ? 22 : 26} color={theme.accent} />
-          </Glass>
-        </PressableScale>
 
         <PressableScale
           pressedScale={0.92}
