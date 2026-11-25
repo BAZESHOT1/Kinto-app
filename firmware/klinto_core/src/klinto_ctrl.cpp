@@ -123,26 +123,21 @@ bool kl_ctrl_verify_descriptor(const uint8_t digest[32], const uint8_t *desc, si
   if (!desc || desc_len < kDescLen) return false;
   mbedtls_ecp_group grp;
   mbedtls_ecp_point q;
-  mbedtls_ecdsa_context ctx;
   mbedtls_ecp_group_init(&grp);
   mbedtls_ecp_point_init(&q);
-  mbedtls_ecdsa_init(&ctx);
   bool ok = false;
   do {
     if (mbedtls_ecp_group_load(&grp, MBEDTLS_ECP_DP_SECP256R1) != 0) break;
     if (mbedtls_ecp_point_read_binary(&grp, &q, desc, kPubLen) != 0) break;
-    if (mbedtls_ecp_copy(&ctx.grp, &grp) != 0) break;
-    if (mbedtls_ecp_copy(&ctx.Q, &q) != 0) break;
     mbedtls_mpi r, s;
     mbedtls_mpi_init(&r);
     mbedtls_mpi_init(&s);
     mbedtls_mpi_read_binary(&r, desc + kPubLen, kSigHalf);
     mbedtls_mpi_read_binary(&s, desc + kPubLen + kSigHalf, kSigHalf);
-    ok = mbedtls_ecdsa_verify(&ctx, digest, 32, &r, &s) == 0;
+    ok = mbedtls_ecdsa_verify(&grp, digest, 32, &q, &r, &s) == 0;
     mbedtls_mpi_free(&r);
     mbedtls_mpi_free(&s);
   } while (false);
-  mbedtls_ecdsa_free(&ctx);
   mbedtls_ecp_point_free(&q);
   mbedtls_ecp_group_free(&grp);
   return ok;
