@@ -170,12 +170,14 @@ export default function CallScreen() {
           </View>
         </View>
       ) : (
-      {phase === 'connecting' ? (
-        <Text style={{ color: theme.textSecondary, marginTop: 20 }}>Подключение…</Text>
-      ) : null}
-      {phase === 'ended' ? (
-        <Text style={{ color: theme.textSecondary, marginTop: 20 }}>Звонок завершён</Text>
-      ) : null}
+        <View style={{ marginTop: 20 }}>
+          {phase === 'connecting' ? (
+            <Text style={{ color: theme.textSecondary }}>Подключение…</Text>
+          ) : null}
+          {phase === 'ended' ? (
+            <Text style={{ color: theme.textSecondary }}>Звонок завершён</Text>
+          ) : null}
+        </View>
       )}
 
       {history.length > 0 ? (
