@@ -13,6 +13,8 @@ export interface HttpTransportHandlers {
   onRead: (chatId: string, seq: number) => void;
   onChatChanged: () => void;
   onChatKey: (chatId: string) => void;
+  /** Входящий аудиозвонок (личный или групповой). */
+  onCallIncoming?: (event: Record<string, unknown>) => void;
 }
 
 export class HttpTransport {
@@ -57,6 +59,7 @@ export class HttpTransport {
           else if (event.type === 'message_delivered') this.handlers.onDelivered(event.chatId, event.messageId);
           else if (event.type === 'message_read') this.handlers.onRead(event.chatId, event.seq);
           else if (event.type === 'chat_added' || event.type === 'chat_key_added') this.handlers.onChatChanged();
+          else if (event.type === 'call_incoming') this.handlers.onCallIncoming?.(event);
         } catch {
           /* некорректное сообщение */
         }

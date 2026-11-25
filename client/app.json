@@ -37,6 +37,7 @@
         "expo-build-properties",
         {
           "android": {
+            "minSdkVersion": 24,
             "enableProguardInReleaseBuilds": true,
             "enableShrinkResourcesInReleaseBuilds": true,
             "googleServicesFile": "./google-services.json"

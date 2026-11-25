@@ -1708,6 +1708,41 @@ export const api = {
       objects: number;
       messages: number;
     }>('/v1/stats'),
+  /* ---- Аудиозвонки (личные и групповые, Hub + kMesh) ---- */
+  callStart: (body: {
+    chatId?: string;
+    members?: string[];
+    kind?: 'direct' | 'group';
+    channel?: 'internet' | 'e-kmesh' | 'l-kmesh';
+    quality?: 'good' | 'poor';
+    e2eKey?: string;
+  }) =>
+    req<{ ok: true; callId: string; roomId: string; e2eKey: string; members: string[] }>(
+      '/v1/calls/start',
+      { method: 'POST', body: JSON.stringify(body) },
+    ),
+  callJoin: (callId: string, sdp: string) =>
+    req<{ ok: true; sdp: string; channel: string; e2eKey: string | null }>(
+      `/v1/calls/${encodeURIComponent(callId)}/join`,
+      { method: 'POST', body: JSON.stringify({ sdp }) },
+    ),
+  callEnd: (callId: string) =>
+    req<{ ok: true; durationMs: number }>(`/v1/calls/${encodeURIComponent(callId)}/end`, {
+      method: 'POST',
+      body: '{}',
+    }),
+  callHistory: (chatId?: string, limit = 50) =>
+    req<{
+      ok: true;
+      calls: Array<{
+        id: string;
+        chatId: string | null;
+        kind: string;
+        channel: string;
+        startedAt: number;
+        durationMs: number;
+      }>;
+    }>(`/v1/calls/history${chatId ? `?chatId=${encodeURIComponent(chatId)}&limit=${limit}` : `?limit=${limit}`}`),
   /* ---- KMesh_v1: синхронизация оффлайн-истории ---- */
   kmeshV1Sync: (body: {
     msg_uuid: string;

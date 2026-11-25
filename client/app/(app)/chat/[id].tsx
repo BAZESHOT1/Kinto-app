@@ -1908,6 +1908,7 @@ function ChatScreen({ forcedId }: { forcedId?: string } = {}) {
           avatar={chat?.type === 'direct' ? peerPresence?.avatar ?? null : chat?.avatar ?? null}
           chatType={chat?.type}
           membersCount={chat?.membersCount}
+          onCall={() => router.push(`/chat/${chatId}/call` as never)}
         />
 
         {secret ? <SecretBanner /> : null}

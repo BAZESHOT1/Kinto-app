@@ -67,6 +67,7 @@ export default function AppLayout() {
         <Stack.Screen name="language" />
         <Stack.Screen name="admin" />
         <Stack.Screen name="chat/[id]" />
+        <Stack.Screen name="chat/[id]/call" options={{ presentation: 'modal', animation: 'slide_from_bottom', gestureEnabled: true }} />
         <Stack.Screen name="chat/[id]/info" />
         <Stack.Screen name="user/[username]" />
         <Stack.Screen name="user/[username]/edit" />
