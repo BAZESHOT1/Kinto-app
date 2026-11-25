@@ -124,6 +124,54 @@ bool kl_crypto_open(const uint8_t key[32], const uint8_t *in, size_t len,
   return true;
 }
 
+/* --------------------------------------------------- control signatures --- */
+
+void kl_crypto_control_digest(uint8_t type, uint32_t packet_id, uint64_t msg_uuid,
+                              uint32_t src_id, uint32_t dst_id, uint32_t next_hop_id,
+                              uint8_t ttl, const uint8_t *payload, size_t payload_len,
+                              uint8_t out[32]) {
+  uint8_t buf[36 + KL_MAX_PAYLOAD];
+  size_t n = 0;
+  buf[n++] = type;
+  kl_write_le32(buf + n, packet_id); n += 4;
+  kl_write_le64(buf + n, msg_uuid); n += 8;
+  kl_write_le32(buf + n, src_id); n += 4;
+  kl_write_le32(buf + n, dst_id); n += 4;
+  // next_hop_id / ttl / hop_count намеренно НЕ входят в digest: ретранслятор
+  // меняет их при пересылке, подпись должна переживать multi-hop.
+  (void)next_hop_id;
+  (void)ttl;
+  buf[n++] = (uint8_t)payload_len;
+  if (payload_len && payload) {
+    const size_t copy = payload_len > KL_MAX_PAYLOAD ? KL_MAX_PAYLOAD : payload_len;
+    memcpy(buf + n, payload, copy);
+    n += copy;
+  }
+  kl_sha256(buf, n, out);
+}
+
+bool kl_crypto_sign_control(uint8_t type, uint32_t packet_id, uint64_t msg_uuid,
+                            uint32_t src_id, uint32_t dst_id, uint32_t next_hop_id,
+                            uint8_t ttl, const uint8_t *payload, size_t payload_len,
+                            uint8_t *sig, size_t *sig_len) {
+  if (!g_signer || !sig || !sig_len) return false;
+  uint8_t digest[32];
+  kl_crypto_control_digest(type, packet_id, msg_uuid, src_id, dst_id, next_hop_id,
+                           ttl, payload, payload_len, digest);
+  return g_signer(g_signer_ctx, digest, sig, sig_len);
+}
+
+bool kl_crypto_verify_control(uint8_t type, uint32_t packet_id, uint64_t msg_uuid,
+                              uint32_t src_id, uint32_t dst_id, uint32_t next_hop_id,
+                              uint8_t ttl, const uint8_t *payload, size_t payload_len,
+                              const uint8_t *sig, size_t sig_len) {
+  if (!g_verifier || !sig || !sig_len) return false;
+  uint8_t digest[32];
+  kl_crypto_control_digest(type, packet_id, msg_uuid, src_id, dst_id, next_hop_id,
+                           ttl, payload, payload_len, digest);
+  return g_verifier(g_signer_ctx, digest, sig, sig_len);
+}
+
 void kl_crypto_perm_digest(uint64_t msg_uuid, uint32_t sender_id, uint32_t receiver_id,
                            uint64_t timestamp_ms, const uint8_t *ciphertext, size_t cipher_len,
                            uint8_t out[32]) {

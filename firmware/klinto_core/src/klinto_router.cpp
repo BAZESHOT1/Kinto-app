@@ -1,9 +1,66 @@
 #include "klinto_router.h"
 #include "klinto_codec.h"
+#include "klinto_crypto.h"
 #include "klinto_util.h"
 
 #include <stdio.h>
 #include <string.h>
+
+/* ------------------------------------------- kMesh v2: подпись управления --- */
+
+#if KL_KMESH_V1
+namespace {
+
+bool kmesh_is_control(uint8_t type) {
+  return type == KL_TYPE_RREQ || type == KL_TYPE_RREP ||
+         type == KL_TYPE_GW_BEACON || type == KL_TYPE_NODE_PRESENCE;
+}
+
+/** Добавить self-contained подпись к исходящему управляющему пакету. */
+void kmesh_sign_control(kl_packet_t *pkt) {
+#if KL_KMESH_V1
+  if (!pkt || !kmesh_is_control(pkt->type)) return;
+  if (pkt->payload_len > KL_MAX_PAYLOAD - KL_CTRL_DESC_LEN) return;
+  uint8_t digest[32];
+  kl_crypto_control_digest(pkt->type, pkt->packet_id, pkt->msg_uuid, pkt->src_id,
+                           pkt->dst_id, pkt->next_hop_id, pkt->ttl,
+                           pkt->payload, pkt->payload_len, digest);
+  uint8_t desc[KL_CTRL_DESC_LEN];
+  size_t dlen = sizeof(desc);
+  if (!kl_ctrl_descriptor(digest, desc, &dlen) || dlen != KL_CTRL_DESC_LEN) return;
+  memcpy(pkt->payload + pkt->payload_len, desc, dlen);
+  pkt->payload_len = (uint8_t)(pkt->payload_len + dlen);
+#else
+  (void)pkt;
+#endif
+}
+
+/** Проверить подпись входящего управления (только у получателя). */
+bool kmesh_verify_control(const kl_packet_t *pkt) {
+#if KL_KMESH_V1
+  if (!pkt || !kmesh_is_control(pkt->type)) return true;
+  if (pkt->payload_len < KL_CTRL_DESC_LEN) return false;
+  const uint8_t *desc = pkt->payload + pkt->payload_len - KL_CTRL_DESC_LEN;
+  if (desc[0] != 0x02 && desc[0] != 0x03) return false;  // сжатая точка P-256
+  uint8_t digest[32];
+  kl_crypto_control_digest(pkt->type, pkt->packet_id, pkt->msg_uuid, pkt->src_id,
+                           pkt->dst_id, pkt->next_hop_id, pkt->ttl,
+                           pkt->payload, pkt->payload_len - KL_CTRL_DESC_LEN, digest);
+  return kl_ctrl_verify_descriptor(digest, desc, KL_CTRL_DESC_LEN);
+#else
+  (void)pkt;
+  return true;
+#endif
+}
+
+}  // namespace
+
+#else  // !KL_KMESH_V1 — host-тесты собираются без подписи управления
+
+static void kmesh_sign_control(kl_packet_t *) {}
+static bool kmesh_verify_control(const kl_packet_t *) { return true; }
+
+#endif  // KL_KMESH_V1
 
 KlintoRouter::KlintoRouter()
     : cfg_(),
@@ -472,6 +529,7 @@ bool KlintoRouter::send_rreq(uint32_t target, uint8_t iface_hint, uint32_t now_m
   uint8_t payload[4];
   kl_write_le32(payload, cfg_.node_id);
   kl_packet_set_payload(&req, payload, sizeof(payload));
+  kmesh_sign_control(&req);
   stats_.rreq_sent++;
   return transmit_on_all(&req, now_ms);
 }
@@ -550,6 +608,7 @@ void KlintoRouter::handle_rreq(kl_packet_t *pkt, uint8_t iface, int16_t rssi, ui
   uint8_t payload[4];
   kl_write_le32(payload, cfg_.node_id);
   kl_packet_set_payload(&rep, payload, sizeof(payload));
+  kmesh_sign_control(&rep);
 
   const kl_route_entry_t *back = find_route(pkt->src_id);
   if (back) {
@@ -638,6 +697,13 @@ void KlintoRouter::on_packet(const kl_packet_t *pkt, uint8_t iface, int16_t rssi
     return;
   }
 
+  /* kMesh v2: управление подписано originating-узлом. Ретрансляторы не
+   * проверяют подпись (дешёвая пересылка), проверяет только получатель. */
+  if (!kmesh_verify_control(pkt)) {
+    stats_.dropped_policy++;
+    return;
+  }
+
   /* Шлюз копирует любой услышанный DATA с NEED_CLOUD_ARCHIVE, даже если
    * кадр адресован другому узлу. Кадры самому шлюзу архивирует uplink-путь,
    * поэтому дубликата публикации нет. */
@@ -704,6 +770,7 @@ void KlintoRouter::on_packet(const kl_packet_t *pkt, uint8_t iface, int16_t rssi
         break;
       case KL_TYPE_DATA:
       case KL_TYPE_SYNC_ARCHIVE:
+      case KL_TYPE_DATA_PAYLOAD:
         stats_.delivered++;
         if (pkt->flags & KL_FLAG_NEED_ACK) send_ack(pkt, iface, now_ms);
         if (sink_.deliver) sink_.deliver(sink_.ctx, pkt, rssi, iface);
@@ -743,9 +810,13 @@ void KlintoRouter::on_packet(const kl_packet_t *pkt, uint8_t iface, int16_t rssi
     if (gw_.valid) {
       kl_packet_t fwd = *pkt;
       fwd.hop_count++;
+#if !KL_KMESH_V1
+      // v1: дублируем last_hop в payload. v2: подпись покрывает payload,
+      // перезапись ломала бы её — reverse-route берётся из last_hop_id.
       if (pkt->type == KL_TYPE_RREP && fwd.payload_len >= 4) {
         kl_write_le32(fwd.payload, cfg_.node_id);
       }
+#endif
       if (transmit(&fwd, gw_.iface, gw_.next_hop_id, now_ms)) stats_.relayed++;
     }
     return;
@@ -754,9 +825,11 @@ void KlintoRouter::on_packet(const kl_packet_t *pkt, uint8_t iface, int16_t rssi
   if (r) {
     kl_packet_t fwd = *pkt;
     fwd.hop_count++;
+#if !KL_KMESH_V1
     if (pkt->type == KL_TYPE_RREP && fwd.payload_len >= 4) {
       kl_write_le32(fwd.payload, cfg_.node_id);
     }
+#endif
     if (transmit(&fwd, r->iface, r->next_hop_id, now_ms)) stats_.relayed++;
     return;
   }
@@ -832,6 +905,9 @@ void KlintoRouter::tick(uint32_t now_ms) {
     bcasts_[i].used = false;
     if ((uint8_t)(pkt.hop_count + 1) >= pkt.ttl) continue;
     pkt.hop_count++;
+#if !KL_KMESH_V1
+    // v1 переписывает payload ретранслированного управления. В v2 подпись
+    // покрывает payload — ретранслятор обязан пересылать его как есть.
     if (pkt.type == KL_TYPE_GW_BEACON) {
       uint8_t payload[10];
       const uint32_t gateway_id = pkt.payload_len >= 8 ? kl_read_le32(pkt.payload + 4) : pkt.src_id;
@@ -843,6 +919,7 @@ void KlintoRouter::tick(uint32_t now_ms) {
     } else if (pkt.type == KL_TYPE_RREQ && pkt.payload_len >= 4) {
       kl_write_le32(pkt.payload, cfg_.node_id);
     }
+#endif
     if (transmit_on_all(&pkt, now_ms)) stats_.relayed++;
   }
 
@@ -916,6 +993,7 @@ void KlintoRouter::tick(uint32_t now_ms) {
     /* 1..13: носимый модуль фиксируется ровно на канале шлюза. */
     payload[10] = cfg_.wifi_channel;
     kl_packet_set_payload(&beacon, payload, sizeof(payload));
+    kmesh_sign_control(&beacon);
     if (transmit_on_all(&beacon, now_ms)) stats_.beacons_sent++;
   }
 
@@ -971,6 +1049,7 @@ void KlintoRouter::emit_gateway_beacon_locked(uint32_t now_ms) {
   payload[9] = capabilities_;
   payload[10] = cfg_.wifi_channel;
   kl_packet_set_payload(&beacon, payload, sizeof(payload));
+  kmesh_sign_control(&beacon);
   if (transmit_on_all(&beacon, now_ms)) stats_.beacons_sent++;
 }
 
@@ -987,6 +1066,7 @@ void KlintoRouter::emit_mobile_beacon(uint32_t now_ms) {
   payload[9] = (uint8_t)(capabilities_ | KL_CAP_MOBILE_GW | KL_CAP_HYBRID_PORTABLE);
   payload[10] = cfg_.wifi_channel;
   kl_packet_set_payload(&beacon, payload, sizeof(payload));
+  kmesh_sign_control(&beacon);
   if (transmit_on_all(&beacon, now_ms)) stats_.beacons_sent++;
 }
 
@@ -1035,6 +1115,7 @@ void KlintoRouter::maybe_presence(uint32_t now_ms) {
   kl_packet_init(&pkt, KL_TYPE_NODE_PRESENCE, cfg_.node_id, KL_ANY_GATEWAY_ID, KL_BROADCAST_ID,
                  KL_FLAG_TO_INTERNET);
   kl_packet_set_payload(&pkt, payload, plen);
+  kmesh_sign_control(&pkt);
   const bool local_only = gateway_like();
   if (!local_only && station && gw_.valid) {
     if (transmit(&pkt, gw_.iface, gw_.next_hop_id, now_ms)) stats_.presence_sent++;

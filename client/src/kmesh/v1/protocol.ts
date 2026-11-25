@@ -7,8 +7,11 @@
  */
 
 export const PACKET_MAGIC = 0xa7;
-export const PACKET_VERSION = 3;
-export const PACKET_HEADER_SIZE = 37; // + frag_index/frag_total
+/** kMesh v2: version 4 добавляет байт qos (VOICE_PRIORITY). v3 — legacy. */
+export const PACKET_VERSION = 4;
+export const PACKET_VERSION_LEGACY = 3;
+export const PACKET_HEADER_SIZE = 38; // + frag_index/frag_total/qos
+export const PACKET_HEADER_SIZE_LEGACY = 37;
 export const MAX_PAYLOAD = 200;
 export const MAX_PACKET_SIZE = 256;
 export const BROADCAST_ID = 0xffffffff;
@@ -22,7 +25,13 @@ export const PacketType = {
   GW_BEACON: 5,
   NODE_PRESENCE: 6,
   SYNC_ARCHIVE: 7,
+  /** kMesh v2: единый тип для любой полезной нагрузки (прошивка не разбирает). */
+  DATA_PAYLOAD: 12,
 } as const;
+
+/** QoS в заголовке v4: голос вытесняет остальные очереди. */
+export const QOS_NORMAL = 0;
+export const QOS_VOICE = 2;
 
 export const PacketFlag = {
   NEED_ACK: 0x01,
@@ -57,7 +66,12 @@ export const RpcOp = {
   LOCAL_SEARCH_RESP: 0x21,
   /** Короткие квитанции доставки/прочтения: [op][flags][chatRef][count][uuid8+status] */
   MSG_RECEIPT: 0x22,
+  /** kMesh v2: [op][flags][зашифрованный конверт приложения]. */
+  DATA_PAYLOAD: 0x33,
 } as const;
+
+/** Флаг VOICE_PRIORITY внутри KL_RPC_DATA_PAYLOAD (прозрачен для прошивки). */
+export const DATA_PAYLOAD_FLAG_VOICE = 0x01;
 
 /** Флаги приложения в заголовке CLIENT_UP (не входят в MeshPacket.flags). */
 export const AppFlag = {
@@ -194,6 +208,10 @@ export interface MeshPacket {
   ttl: number;
   hopCount: number;
   payload: Uint8Array;
+  /** kMesh v2 (version 4). 2 = голос. */
+  qos?: number;
+  fragIndex?: number;
+  fragTotal?: number;
 }
 
 export function encodeMeshPacket(packet: MeshPacket): Uint8Array {
@@ -213,20 +231,28 @@ export function encodeMeshPacket(packet: MeshPacket): Uint8Array {
   out[32] = packet.ttl & 0xff;
   out[33] = packet.hopCount & 0xff;
   out[34] = packet.payload.length;
+  out[35] = packet.fragIndex ?? 0;
+  out[36] = packet.fragTotal ?? 0;
+  out[37] = packet.qos ?? QOS_NORMAL;
   out.set(packet.payload, PACKET_HEADER_SIZE);
   view.setUint16(PACKET_HEADER_SIZE + packet.payload.length, crc16(out.subarray(0, PACKET_HEADER_SIZE + packet.payload.length)), true);
   return out;
 }
 
 export function decodeMeshPacket(data: Uint8Array): MeshPacket | null {
-  if (data.length < PACKET_HEADER_SIZE + 2) return null;
-  if (data[0] !== PACKET_MAGIC || data[1] !== PACKET_VERSION) return null;
+  if (data.length < PACKET_HEADER_SIZE_LEGACY + 2) return null;
+  if (data[0] !== PACKET_MAGIC) return null;
+  const version = data[1];
+  const v2 = version === PACKET_VERSION;
+  if (!v2 && version !== PACKET_VERSION_LEGACY) return null;
+  const headerSize = v2 ? PACKET_HEADER_SIZE : PACKET_HEADER_SIZE_LEGACY;
+  if (data.length < headerSize + 2) return null;
   const view = new DataView(data.buffer, data.byteOffset, data.byteLength);
   const len = data[34];
   if (len > MAX_PAYLOAD) return null;
-  if (data.length < PACKET_HEADER_SIZE + len + 2) return null;
-  const expected = view.getUint16(PACKET_HEADER_SIZE + len, true);
-  if (crc16(data.subarray(0, PACKET_HEADER_SIZE + len)) !== expected) return null;
+  if (data.length < headerSize + len + 2) return null;
+  const expected = view.getUint16(headerSize + len, true);
+  if (crc16(data.subarray(0, headerSize + len)) !== expected) return null;
   return {
     packetId: view.getUint32(2, true),
     msgUuid: view.getBigUint64(6, true),
@@ -238,7 +264,10 @@ export function decodeMeshPacket(data: Uint8Array): MeshPacket | null {
     flags: data[31],
     ttl: data[32],
     hopCount: data[33],
-    payload: data.slice(PACKET_HEADER_SIZE, PACKET_HEADER_SIZE + len),
+    payload: data.slice(headerSize, headerSize + len),
+    qos: v2 ? data[37] : QOS_NORMAL,
+    fragIndex: data[35],
+    fragTotal: data[36],
   };
 }
 

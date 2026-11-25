@@ -50,6 +50,37 @@ typedef bool (*kl_verify_cb_t)(void *ctx, const uint8_t digest[32], const uint8_
 void kl_crypto_set_signers(kl_sign_cb_t signer, kl_verify_cb_t verifier, void *ctx);
 bool kl_crypto_has_signer();
 
+/* --------------------------------------------------- control signatures --- */
+
+/** Максимальная длина подписи управления (ECDSA P-256 / Ed25519). */
+#define KL_CTRL_SIG_MAX 72
+
+/** Канонический digest управляющего пакета (без crc и без самой подписи). */
+void kl_crypto_control_digest(uint8_t type, uint32_t packet_id, uint64_t msg_uuid,
+                              uint32_t src_id, uint32_t dst_id, uint32_t next_hop_id,
+                              uint8_t ttl, const uint8_t *payload, size_t payload_len,
+                              uint8_t out[32]);
+
+/** Подписать/проверить управление через зарегистрированные platform callbacks. */
+bool kl_crypto_sign_control(uint8_t type, uint32_t packet_id, uint64_t msg_uuid,
+                            uint32_t src_id, uint32_t dst_id, uint32_t next_hop_id,
+                            uint8_t ttl, const uint8_t *payload, size_t payload_len,
+                            uint8_t *sig, size_t *sig_len);
+bool kl_crypto_verify_control(uint8_t type, uint32_t packet_id, uint64_t msg_uuid,
+                              uint32_t src_id, uint32_t dst_id, uint32_t next_hop_id,
+                              uint8_t ttl, const uint8_t *payload, size_t payload_len,
+                              const uint8_t *sig, size_t sig_len);
+
+/** Платформенная подпись управления (только ESP32); на хосте no-op. */
+void kl_ctrl_signer_init();
+
+/** Self-contained дескриптор управления: [compressed pubkey 33][sig 64] = 97 B. */
+#define KL_CTRL_PUB_LEN 33
+#define KL_CTRL_DESC_LEN 97
+bool kl_ctrl_pubkey(uint8_t out[KL_CTRL_PUB_LEN]);
+bool kl_ctrl_descriptor(const uint8_t digest[32], uint8_t out[KL_CTRL_DESC_LEN], size_t *out_len);
+bool kl_ctrl_verify_descriptor(const uint8_t digest[32], const uint8_t *desc, size_t desc_len);
+
 void kl_crypto_perm_digest(uint64_t msg_uuid, uint32_t sender_id, uint32_t receiver_id,
                            uint64_t timestamp_ms, const uint8_t *ciphertext, size_t cipher_len,
                            uint8_t out[32]);

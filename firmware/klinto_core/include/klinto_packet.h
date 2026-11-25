@@ -21,9 +21,14 @@ enum kl_packet_type_t : uint8_t {
   KL_TYPE_OTA_ANNOUNCE = 8,
   KL_TYPE_OTA_CHUNK = 9,
   KL_TYPE_OTA_NACK = 10,
-  /** Носимый/ретранслятор ищет шлюз: шлюз отвечает немедленным GW_BEACON. */
-  KL_TYPE_GW_PROBE = 11
+  KL_TYPE_GW_PROBE = 11,
+  /** kMesh v2: единый тип для ЛЮБОЙ полезной нагрузки (шифруется на уровне приложения). */
+  KL_TYPE_DATA_PAYLOAD = 12
 };
+
+/** QoS в заголовке DATA_PAYLOAD: голос вытесняет остальные очереди. */
+#define KL_QOS_NORMAL 0
+#define KL_QOS_VOICE  2
 
 enum kl_packet_flags_t : uint8_t {
   KL_FLAG_NEED_ACK = 0x01,
@@ -39,8 +44,8 @@ enum kl_packet_flags_t : uint8_t {
 };
 
 #define KL_PACKET_MAGIC 0xA7
-#define KL_PACKET_VERSION 3
-#define KL_PACKET_HEADER_SIZE 37
+#define KL_PACKET_VERSION 4
+#define KL_PACKET_HEADER_SIZE 38
 
 /** Максимальный размер полезной нагрузки на фрагмент при переходе на LoRA (ретрансляторы передают ≤228B). */
 #define KL_LORA_FRAG_MAX 228u
@@ -62,6 +67,8 @@ struct kl_packet_header_t {
   /** Фрагментация LoRA (0 = нет фрагментов). */
   uint8_t frag_index;
   uint8_t frag_total;
+  /** kMesh v2: приоритет доставки (KL_QOS_*); 0 = обычный. */
+  uint8_t qos;
 } KL_PACKED;
 
 struct kl_packet_t {
@@ -81,12 +88,13 @@ struct kl_packet_t {
   /** Фрагментация LoRA: 0 = не фрагментирован. */
   uint8_t frag_index;
   uint8_t frag_total;
+  uint8_t qos;
   uint8_t payload[KL_MAX_PAYLOAD];
   uint16_t crc16;
 } KL_PACKED;
 
 static_assert(sizeof(kl_packet_header_t) == KL_PACKET_HEADER_SIZE,
-              "MeshPacket header must be 35 bytes on the wire");
+              "MeshPacket header must be packed");
 static_assert(sizeof(kl_packet_t) == KL_PACKET_HEADER_SIZE + KL_MAX_PAYLOAD + 2,
               "MeshPacket must stay packed");
 

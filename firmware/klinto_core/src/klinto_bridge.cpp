@@ -446,6 +446,24 @@ void KlintoClientBridge::handle_rpc_up(const uint8_t *payload, size_t len) {
   log_line("[TRACE 1/4] BLE->NODE: recv RPC cmd=%u len=%u msg_uuid=%08lx%08lx dst=%lu",
            (unsigned)op, (unsigned)rpc_len, (unsigned long)(uuid >> 32),
            (unsigned long)(uuid & 0xFFFFFFFFu), (unsigned long)dst);
+
+  /* kMesh v2: DATA_PAYLOAD — прошивка слепой курьер. Не расшифровываем, не
+   * разбираем opcode внутри конверта, не добавляем NEED_CLOUD_ARCHIVE.
+   * Шлюз и ретрансляторы видят только непрозрачные байты. */
+  if (op == KL_RPC_DATA_PAYLOAD) {
+    kl_packet_t pkt;
+    kl_packet_init(&pkt, KL_TYPE_DATA_PAYLOAD, cfg_.node_id, dst, KL_BROADCAST_ID, 0);
+    pkt.qos = (rpc_len > 1 && (rpc[1] & KL_RPC_DP_FLAG_VOICE)) ? KL_QOS_VOICE : KL_QOS_NORMAL;
+    pkt.msg_uuid = uuid ? uuid : kl_snowflake_next(cfg_.node_id, kl_uptime_ms());
+    if (!kl_packet_set_payload(&pkt, rpc, rpc_len)) {
+      status(uuid, 0, KL_STATUS_FAILED);
+      return;
+    }
+    const bool sent = router_->send(&pkt, kl_uptime_ms(), 0xFF, true);
+    status(pkt.msg_uuid, pkt.packet_id, sent ? KL_STATUS_QUEUED : KL_STATUS_FAILED);
+    return;
+  }
+
   if (op == KL_RPC_SEND_TEXT) {
     kl_rpc_text_t text;
     char decoded[KL_MAX_TEXT + 1];

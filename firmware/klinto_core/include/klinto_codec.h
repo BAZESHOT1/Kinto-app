@@ -34,7 +34,15 @@ enum kl_rpc_op_t : uint8_t {
   /** Аудиокадр Opus по E-kMesh: [0x31][room_len u8][room][seq u16][opus]. */
   KL_RPC_AUDIO_FRAME = 0x31,
   /** Микшированный аудиокадр из Hub в приложение: [0x32][seq u16][opus]. */
-  KL_RPC_AUDIO_DOWN = 0x32
+  KL_RPC_AUDIO_DOWN = 0x32,
+  /**
+   * kMesh v2: универсальная полезная нагрузка. Прошивка НЕ разбирает и не
+   * расшифровывает тело — это непрозрачный зашифрованный конверт приложения.
+   * Формат конверта полностью определяется на стороне клиента, поэтому новые
+   * функции (файлы, уведомления и т.д.) не требуют перепрошивки.
+   * [0x33][flags u8][envelope bytes...]; flags bit0 = VOICE_PRIORITY.
+   */
+  KL_RPC_DATA_PAYLOAD = 0x33
 };
 
 enum kl_search_type_t : uint8_t {
@@ -43,6 +51,9 @@ enum kl_search_type_t : uint8_t {
   KL_SEARCH_GROUPS = 2,
   KL_SEARCH_CHANNELS = 3
 };
+
+/** Флаги KL_RPC_DATA_PAYLOAD (прозрачны для прошивки). */
+#define KL_RPC_DP_FLAG_VOICE 0x01
 
 #define KL_SEARCH_MAX_RESULTS 5
 #define KL_FEED_MAX_ENTRIES 5

@@ -61,6 +61,11 @@ import {
 } from './protocol';
 import { b64ToBytes, bytesToB64, signPermanent } from './crypto';
 import {
+  makeDataPayloadRpc,
+  parseDataPayloadRpc,
+  type DataEnvelope,
+} from '../v2/envelope';
+import {
   crc16,
   decodeLocalSearch,
   encodeLocalSearchReq,
@@ -120,6 +125,11 @@ export interface KMeshV1ClientOptions {
   onReceipt?: (chatRef: number, entries: ReceiptEntry[]) => void;
   /** Микшированный Opus-кадр E-kMesh звонка: [seq u16][opus]. */
   onAudioFrame?: (frame: Uint8Array) => void;
+  /**
+   * kMesh v2: универсальная полезная нагрузка. Прошивка не расшифровывает
+   * конверт — приложение само выбирает ключ по scheme/keyId.
+   */
+  onDataPayload?: (envelope: DataEnvelope, packet: MeshPacket) => void;
   /** Прогресс записи кадра в BLE: байты и привязка к сообщению. */
   onSendProgress?: (event: {
     msgUuid: string;
@@ -275,6 +285,21 @@ export class KMeshV1Client {
     new DataView(rpc.buffer).setUint16(2 + room.length, seq & 0xffff, true);
     rpc.set(opus, 4 + room.length);
     const up = encodeRpcUp(ANY_GATEWAY_ID, PacketFlag.TO_INTERNET, 0n, rpc);
+    return this.link.send(encodeClientFrame(ClientFrameType.RPC_UP, up, this.seq++));
+  }
+
+  /**
+   * kMesh v2: отправить непрозрачный зашифрованный конверт. Прошивка видит
+   * только opcode 0x33 и флаг приоритета; формат конверта известен приложению.
+   */
+  sendDataPayload(
+    envelope: Uint8Array,
+    dstId: number,
+    opts: { voice?: boolean; toInternet?: boolean; msgUuid?: bigint } = {},
+  ): Promise<boolean> {
+    const rpc = makeDataPayloadRpc(envelope, opts.voice ?? false);
+    const flags = opts.toInternet ? PacketFlag.TO_INTERNET : 0;
+    const up = encodeRpcUp(dstId >>> 0, flags, opts.msgUuid ?? 0n, rpc);
     return this.link.send(encodeClientFrame(ClientFrameType.RPC_UP, up, this.seq++));
   }
 
@@ -872,6 +897,11 @@ export class KMeshV1Client {
                 this.opts.onChatKey?.(chatId, resp.version, resp.key);
               }
             }
+            break;
+          }
+          if (op === RpcOp.DATA_PAYLOAD) {
+            const envelope = parseDataPayloadRpc(packet.payload);
+            if (envelope) this.opts.onDataPayload?.(envelope, packet);
             break;
           }
           if (op === RpcOp.SEND_ENVELOPE) {

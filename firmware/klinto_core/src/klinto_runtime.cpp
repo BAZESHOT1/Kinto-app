@@ -318,6 +318,7 @@ bool KlintoNode::begin() {
     Serial.println("[klinto3] LittleFS mount failed");
   }
   loadConfig();
+  kl_ctrl_signer_init(); /* kMesh v2: подпись управляющих пакетов */
   /* Фиксируем в NVS роль/распиновку/тип модуля из сборки: эти параметры
    * должны переживать перезагрузку и OTA. */
   kl_config_save_nvs(&cfg_);
@@ -602,7 +603,10 @@ bool KlintoNode::sinkSend(void *ctx, const kl_packet_t *pkt, uint8_t iface, uint
   const size_t len = kl_packet_serialize(pkt, wire, sizeof(wire));
   if (!len) return false;
   uint8_t priority = KL_PRIO_MEDIUM;
-  if (pkt->type == KL_TYPE_ACK || pkt->type == KL_TYPE_RREP) priority = KL_PRIO_HIGH;
+  /* kMesh v2: VOICE_PRIORITY в заголовке DATA_PAYLOAD — голос вытесняет
+   * остальные очереди на LoRa/ESP-NOW; прошивка не заглядывает в конверт. */
+  if (pkt->qos == KL_QOS_VOICE) priority = KL_PRIO_HIGH;
+  else if (pkt->type == KL_TYPE_ACK || pkt->type == KL_TYPE_RREP) priority = KL_PRIO_HIGH;
   else if (pkt->type == KL_TYPE_OTA_ANNOUNCE || pkt->type == KL_TYPE_OTA_CHUNK ||
            pkt->type == KL_TYPE_OTA_NACK) {
     priority = KL_PRIO_OTA_IDLE;
