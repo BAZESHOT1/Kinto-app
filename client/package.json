@@ -1,6 +1,6 @@
 {
   "name": "@klinto/client",
-  "version": "1.10.85",
+  "version": "1.10.86",
   "private": true,
   "main": "index.js",
   "scripts": {

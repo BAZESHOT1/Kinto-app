@@ -95,7 +95,7 @@ function ChatInfoScreen({ forcedId }: { forcedId?: string } = {}) {
 
   React.useEffect(() => {
     let alive = true;
-    void api.callCanStart(chatId).then((r) => {
+    void api.api.callCanStart(chatId).then((r) => {
       if (alive) setCanStartCall(r.canStart);
     }).catch(() => undefined);
     return () => { alive = false; };

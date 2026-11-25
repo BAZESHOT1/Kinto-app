@@ -184,7 +184,7 @@ function ChatScreen({ forcedId }: { forcedId?: string } = {}) {
     if (!chatId) return undefined;
     let alive = true;
     const load = () => {
-      void api.callActive(chatId).then((r) => {
+      void api.api.callActive(chatId).then((r) => {
         if (alive) setActiveCall(r.call ? {
           id: r.call.id, startedAt: r.call.startedAt,
           durationMs: r.call.durationMs, participants: r.call.participants,
