@@ -231,7 +231,9 @@ bool LoraInterface::trySendNow(const TxItem &item, uint32_t air_ms) {
     airtime_window_ms_ = now;
     airtime_used_ms_ = 0;
   }
-  if (airtime_used_ms_ + air_ms > cfg_.lora.max_airtime_ms_per_min) return false;
+  if (airtime_used_ms_ + air_ms > cfg_.lora.max_airtime_ms_per_min) {
+    return false;
+  }
 
   /* CSMA/CA: a handful of CAD probes with exponential jitter. */
   for (int attempt = 0; attempt < 4; ++attempt) {
@@ -302,28 +304,33 @@ void LoraInterface::taskLoop() {
     bool have = false;
     {
       KlintoGuard guard(queue_lock_);
-      if (count_ == 0) {
-        vTaskDelay(pdMS_TO_TICKS(5));
-        continue;
-      }
-      int best = -1;
-      for (int i = 0; i < 12; ++i) {
-        if (!queue_[i].len) continue;
-        if (best < 0 || queue_[i].priority < queue_[best].priority ||
-            (queue_[i].priority == queue_[best].priority && queue_[i].seq < queue_[best].seq)) {
-          best = i;
+      if (count_ > 0) {
+        int best = -1;
+        for (int i = 0; i < 12; ++i) {
+          if (!queue_[i].len) continue;
+          if (best < 0 || queue_[i].priority < queue_[best].priority ||
+              (queue_[i].priority == queue_[best].priority && queue_[i].seq < queue_[best].seq)) {
+            best = i;
+          }
+        }
+        if (best >= 0) {
+          item = queue_[best];
+          have = true;
+        } else {
+          count_ = 0;
         }
       }
-      if (best < 0) {
-        count_ = 0;
-        continue;
-      }
-      item = queue_[best];
-      have = true;
     }
-    if (!have) continue;
+    if (!have) {
+      /* Очередь пуста: выпускаем поток наружу, не задерживая его внутри guard. */
+      vTaskDelay(pdMS_TO_TICKS(5));
+      continue;
+    }
 
-    const uint32_t air_ms = phys_ ? (uint32_t)phys_->getTimeOnAir(item.len) : 1000;
+    const uint32_t air_ms_raw = phys_ ? (uint32_t)phys_->getTimeOnAir(item.len) : 1000;
+    /* getTimeOnAir может возвращать абсурдные значения (меньше реального временя на эфир
+     * или перебочить max_airtime_ms_per_min) — поэтому верхняя граница понятнее физически. */
+    const uint32_t air_ms = air_ms_raw > 10000u ? 10000u : air_ms_raw;
     const bool low = item.priority == KL_PRIO_LOW;
     if (trySendNow(item, air_ms) || low) {
       /* Remove by seq: sendPacket may have appended/preempted concurrently. */

@@ -613,7 +613,10 @@ bool KlintoNode::sinkSend(void *ctx, const kl_packet_t *pkt, uint8_t iface, uint
              kl_rpc_priority_hint(pkt->payload, pkt->payload_len) == KL_PRIO_LOW) {
     priority = KL_PRIO_LOW;
   }
-  if (iface == KL_IFACE_LORA) return self->lora_.sendPacket(wire, len, next_hop, priority);
+  if (iface == KL_IFACE_LORA) {
+    bool ok = self->lora_.sendPacket(wire, len, next_hop, priority);
+    return ok;
+  }
   if (iface == KL_IFACE_ESPNOW) return self->espnow_.sendPacket(wire, len, next_hop, priority);
   return false;
 }
@@ -713,8 +716,7 @@ bool KlintoNode::cellApplyChannel(void *ctx, uint8_t wifi_channel) {
   if (esp_wifi_get_channel(&actual, &second) != ESP_OK) actual = 0;
   Serial.printf("[klinto] radio cell: wifi=%u act=%u lora=%.3f MHz sync=0x%02X\n",
                 (unsigned)wifi_channel, (unsigned)actual, (double)self->cfg_.lora.freq_mhz,
-                (unsigned)self->cfg_.lora.sync_word);
-  return true;
+                (unsigned)self->cfg_.lora.sync_word);  return true;
 }
 
 void KlintoNode::cellLocked(void *ctx, uint8_t channel, uint32_t gateway_id, int16_t rssi,

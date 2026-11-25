@@ -15,6 +15,7 @@
 #if defined(ESP_PLATFORM)
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+#include "freertos/semphr.h"
 #endif
 
 #ifndef KL_PACKED
@@ -40,8 +41,24 @@ uint32_t kl_fnv1a32(const char *text);
  */
 class KlintoLock {
  public:
-  KlintoLock() : flag_(false) {}
+  KlintoLock() {
+#if defined(ESP_PLATFORM)
+    /* Рекурсивные мьютексы и встроенный priority inheritance в FreeRTOS помогают
+     * на одноядерном C3: пока мьютекс скачан, ожидающий поднимается, держатель
+     * успевает сделать свой короткий критический участок и отпустить. */
+    mutex_ = xSemaphoreCreateMutex();
+#endif
+  }
+
   void lock() {
+#if defined(ESP_PLATFORM)
+    if (mutex_) {
+      while (xSemaphoreTake(mutex_, portMAX_DELAY) != pdTRUE) {
+        /* Только ради успокоения компилятора: при корректном использовании падать тут нельзя. */
+      }
+      return;
+    }
+#endif
     uint32_t spins = 0;
     while (flag_.exchange(true, std::memory_order_acquire)) {
 #if defined(ESP_PLATFORM)
@@ -55,11 +72,31 @@ class KlintoLock {
 #endif
     }
   }
-  void unlock() { flag_.store(false, std::memory_order_release); }
-  bool try_lock() { return !flag_.exchange(true, std::memory_order_acquire); }
+
+  void unlock() {
+#if defined(ESP_PLATFORM)
+    if (mutex_) {
+      xSemaphoreGive(mutex_);
+      return;
+    }
+#endif
+    flag_.store(false, std::memory_order_release);
+  }
+
+  bool try_lock() {
+#if defined(ESP_PLATFORM)
+    if (mutex_) {
+      return xSemaphoreTake(mutex_, 0) == pdTRUE;
+    }
+#endif
+    return !flag_.exchange(true, std::memory_order_acquire);
+  }
 
  private:
   std::atomic<bool> flag_;
+#if defined(ESP_PLATFORM)
+  SemaphoreHandle_t mutex_ = nullptr;
+#endif
   KlintoLock(const KlintoLock &);
   KlintoLock &operator=(const KlintoLock &);
 };
