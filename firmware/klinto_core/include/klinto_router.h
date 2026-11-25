@@ -111,6 +111,8 @@ struct kl_router_stats_t {
   uint32_t rrep_sent;
   uint32_t beacons_sent;
   uint32_t presence_sent;
+  /** Возраст кластерного шлюза в мс (0, если не видели). */
+  uint32_t gw_age_ms;
 };
 
 struct kl_router_sink_t {
@@ -228,6 +230,9 @@ class KlintoRouter {
   uint16_t relay_penalty_ms(uint8_t iface) const;
 
   const kl_router_stats_t *stats() const { return &stats_; }
+
+  /** Интерфейс последней успешной отправки (KL_IFACE_ESP_NOW / KL_IFACE_LORA). */
+  uint8_t lastTxIface() const { return last_tx_iface_; }
   uint16_t pending_count() const;
   uint16_t ack_count() const;
 
@@ -294,6 +299,7 @@ class KlintoRouter {
   uint32_t beacons_rx_ = 0;
   uint32_t boot_ms_;
   kl_router_stats_t stats_;
+  uint8_t last_tx_iface_ = KL_IFACE_ESPNOW;
   KlintoLock lock_;
 };
 

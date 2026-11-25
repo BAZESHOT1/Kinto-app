@@ -33,13 +33,17 @@ enum kl_packet_flags_t : uint8_t {
   KL_FLAG_PERM_USER_KEY = 0x10,
   KL_FLAG_NEED_CLOUD_ARCHIVE = 0x20,
   KL_FLAG_COMPRESSED_UNISHOX = 0x40,
-  /* 0 = CLIENT_RESIGN (client re-signs on sync), 1 = SERVER_RESIGN. */
+  /** Пакет фрагментирован (обычно при переходе на LoRA): frag_index — какой фрагмент, frag_total — сколько. */
+#define KL_FLAG_FRAGMENTED 0x01
   KL_FLAG_SERVER_RESIGN = 0x80
 };
 
 #define KL_PACKET_MAGIC 0xA7
 #define KL_PACKET_VERSION 3
-#define KL_PACKET_HEADER_SIZE 35
+#define KL_PACKET_HEADER_SIZE 37
+
+/** Максимальный размер полезной нагрузки на фрагмент при переходе на LoRA (ретрансляторы передают ≤228B). */
+#define KL_LORA_FRAG_MAX 228u
 
 struct kl_packet_header_t {
   uint8_t magic;
@@ -55,6 +59,9 @@ struct kl_packet_header_t {
   uint8_t ttl;
   uint8_t hop_count;
   uint8_t payload_len;
+  /** Фрагментация LoRA (0 = нет фрагментов). */
+  uint8_t frag_index;
+  uint8_t frag_total;
 } KL_PACKED;
 
 struct kl_packet_t {
@@ -71,13 +78,16 @@ struct kl_packet_t {
   uint8_t ttl;
   uint8_t hop_count;
   uint8_t payload_len;
+  /** Фрагментация LoRA: 0 = не фрагментирован. */
+  uint8_t frag_index;
+  uint8_t frag_total;
   uint8_t payload[KL_MAX_PAYLOAD];
   uint16_t crc16;
 } KL_PACKED;
 
 static_assert(sizeof(kl_packet_header_t) == KL_PACKET_HEADER_SIZE,
               "MeshPacket header must be 35 bytes on the wire");
-static_assert(sizeof(kl_packet_t) == 35 + KL_MAX_PAYLOAD + 2,
+static_assert(sizeof(kl_packet_t) == KL_PACKET_HEADER_SIZE + KL_MAX_PAYLOAD + 2,
               "MeshPacket must stay packed");
 
 /** Monotonic, boot-unique packet id. */

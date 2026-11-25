@@ -1693,21 +1693,31 @@ export default function ChatsScreen() {
         setMeshRefreshing(true);
         // Ждём ответ ленты от Hub (через шлюз), чтобы индикатор обновления был честным.
         const answered = new Promise<boolean>((resolve) => {
-          const timer = setTimeout(() => {
-            un();
-            resolve(false);
-          }, 20_000);
-          const un = onKmeshFeed(() => {
+          let answeredFlag = false;
+          const finish = (v: boolean) => {
+            if (answeredFlag) return;
+            answeredFlag = true;
             clearTimeout(timer);
             un();
-            resolve(true);
-          });
+            resolve(v);
+          };
+          const timer = setTimeout(() => finish(false), 45_000);
+          const un = onKmeshFeed(() => finish(true));
         });
-        const ok = await requestKmeshFeed(since).catch(() => false);
-        const got = ok ? await answered : false;
+        // Повтор при отсутствии ответа: gateway может слить ответ в следующие вызовы.
+        let ok = false;
+        let attempts = 0;
+        while (attempts < 2 && !ok) {
+          attempts += 1;
+          const sent = await requestKmeshFeed(since).catch(() => false);
+          ok = sent ? (await answered) : false;
+          if (!ok) await new Promise((resolve) => setTimeout(resolve, 1_500));
+        }
         setMeshRefreshing(false);
-        if (ok && !got) {
-          useStore.getState().pushToast({ kind: 'info', message: 'Hub не ответил через kMesh — попробуйте ещё раз.' });
+        if (ok) {
+          // Успех подтверждаем тихо: при втором подходе лента приходит без индикатора.
+        } else if (attempts >= 2) {
+          useStore.getState().pushToast({ kind: 'info', message: 'Hub не ответил через kMesh — данные обновлются позже.' });
         }
         if (!ok) {
           useStore.getState().pushToast({

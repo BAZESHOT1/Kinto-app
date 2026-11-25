@@ -521,6 +521,86 @@ void KlintoClientBridge::handle_rpc_up(const uint8_t *payload, size_t len) {
 
 void KlintoClientBridge::deliver_mesh(const kl_packet_t *pkt) {
   if (!pkt) return;
+  if (pkt->frag_total > 1 && pkt->frag_index < pkt->frag_total) {
+    /* LoRA-фрагментация: собираем, когда все фрагменты пришли — deliver_mesh_reassembled(). */
+    Reasm *r = reasm_add(pkt);
+    if (!r) return;
+    /* Проверим: все фрагменты на месте? */
+    bool done = false;
+    size_t total_len = 0;
+    for (uint8_t i = 0; i < r->total; ++i) {
+      if (r->lens[i] == 0 && r->got != r->total) break;
+    }
+    done = r->got == r->total;
+    if (!done) return;
+    /* Собираем пакет. */
+    kl_packet_t assembled;
+    memset(&assembled, 0, sizeof(assembled));
+    assembled.magic = pkt->magic;
+    assembled.version = pkt->version;
+    assembled.packet_id = pkt->packet_id;
+    assembled.msg_uuid = pkt->msg_uuid;
+    assembled.src_id = pkt->src_id;
+    assembled.dst_id = pkt->dst_id;
+    assembled.next_hop_id = pkt->next_hop_id;
+    assembled.last_hop_id = pkt->last_hop_id;
+    assembled.type = pkt->type;
+    assembled.flags = (uint8_t)(pkt->flags & ~KL_FLAG_FRAGMENTED);
+    assembled.ttl = pkt->ttl;
+    assembled.hop_count = pkt->hop_count;
+    for (uint8_t i = 0; i < r->total; ++i) total_len += r->lens[i];
+    if (total_len > KL_MAX_PAYLOAD) { reasm_free(r); return; }
+    assembled.payload_len = (uint8_t)total_len;
+    memcpy(assembled.payload, r->chunk, total_len);
+    reasm_free(r);
+    deliver_mesh_reassembled(&assembled);
+    return;
+  }
+  deliver_mesh_reassembled(pkt);
+}
+
+void KlintoClientBridge::reasm_free(Reasm *r) {  if (!r) return;
+  r->used = false;
+  r->got = 0;
+  r->total = 0;
+}
+
+KlintoClientBridge::Reasm *KlintoClientBridge::reasm_add(const kl_packet_t *pkt) {
+  KlintoGuard guard(status_lock_);
+  if (!pkt || !pkt->frag_total || pkt->frag_index >= pkt->frag_total || pkt->frag_total > 8) return nullptr;
+  Reasm *r = nullptr;
+  for (auto &s : reasm_) {
+    if (s.used && s.msg_uuid == pkt->msg_uuid && s.src_id == pkt->src_id &&
+        s.packet_id == pkt->packet_id) {
+      r = &s;
+      break;
+    }
+  }
+  if (!r) {
+    for (auto &s : reasm_) {
+      if (!s.used) { r = &s; break; }
+    }
+    if (!r) return nullptr; /* нет места */
+    memset(r, 0, sizeof(*r));
+    r->used = true;
+    r->msg_uuid = pkt->msg_uuid;
+    r->src_id = pkt->src_id;
+    r->packet_id = pkt->packet_id;
+    r->total = pkt->frag_total;
+  }
+  const uint8_t idx = pkt->frag_index;
+  const uint8_t stride = (uint8_t)(KL_LORA_FRAG_MAX > 0 ? KL_LORA_FRAG_MAX : 200);
+  const size_t off = idx * (size_t)stride;
+  const size_t cap = sizeof(r->chunk) - off;
+  if (pkt->payload_len > cap) return nullptr;
+  memcpy(r->chunk + off, pkt->payload, pkt->payload_len);
+  r->lens[idx] = pkt->payload_len;
+  r->got++;
+  return r;
+}
+
+void KlintoClientBridge::deliver_mesh_reassembled(const kl_packet_t *pkt) {
+  if (!pkt) return;
   kl_packet_t out = *pkt;
 
   /* Decrypt and decompress into a transparent RPC for the app. */
@@ -580,6 +660,16 @@ void KlintoClientBridge::deliver_mesh(const kl_packet_t *pkt) {
 void KlintoClientBridge::status(uint64_t msg_uuid, uint32_t packet_id, uint8_t status_code) {
   log_line("[status] msg=%08lx%08lx pkt=%lu st=%u", (unsigned long)(msg_uuid >> 32),
            (unsigned long)(msg_uuid & 0xFFFFFFFFu), (unsigned long)packet_id, (unsigned)status_code);
+  if (router_) {
+    const uint8_t iface = router_->lastTxIface();
+    const auto *st = router_->stats();
+    /* Нагрузка кластера: трафик и возраст шлюза — передаём на телефон. */
+    log_line("[kmesh] load iface=%s rx=%lu tx=%lu ack_rx=%lu retries=%lu gw_age=%lu",
+             (iface == KL_IFACE_LORA) ? "L-kMesh" : "E-kMesh",
+             (unsigned long)st->rx_packets, (unsigned long)st->tx_packets,
+             (unsigned long)st->acks_received, (unsigned long)st->retries,
+             (unsigned long)st->gw_age_ms);
+  }
   StatusEvt evt;
   memset(&evt, 0, sizeof(evt));
   evt.msg_uuid = msg_uuid;

@@ -77,6 +77,8 @@ size_t kl_packet_serialize(const kl_packet_t *pkt, uint8_t *out, size_t cap) {
   out[32] = pkt->ttl;
   out[33] = pkt->hop_count;
   out[34] = pkt->payload_len;
+  out[35] = pkt->frag_index;
+  out[36] = pkt->frag_total;
   if (pkt->payload_len) memcpy(out + KL_PACKET_HEADER_SIZE, pkt->payload, pkt->payload_len);
   const uint16_t crc = kl_packet_compute_crc(out, KL_PACKET_HEADER_SIZE + pkt->payload_len);
   kl_write_le16(out + KL_PACKET_HEADER_SIZE + pkt->payload_len, crc);
@@ -106,6 +108,8 @@ bool kl_packet_parse_header(const uint8_t *buf, size_t len, kl_packet_header_t *
   out->ttl = buf[32];
   out->hop_count = buf[33];
   out->payload_len = payload_len;
+  out->frag_index = buf[35];
+  out->frag_total = buf[36];
   return true;
 }
 
@@ -124,6 +128,8 @@ bool kl_packet_parse(const uint8_t *buf, size_t len, kl_packet_t *out) {
   out->ttl = h.ttl;
   out->hop_count = h.hop_count;
   out->payload_len = h.payload_len;
+  out->frag_index = h.frag_index;
+  out->frag_total = h.frag_total;
   if (h.payload_len) {
     memcpy(out->payload, buf + KL_PACKET_HEADER_SIZE, h.payload_len);
   }

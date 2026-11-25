@@ -16,11 +16,11 @@
 #endif
 
 /** Минимальный интервал между кадрами ESP-NOW: защита от «эфирного шторма». */
-#define KL_ESPNOW_MIN_TX_GAP_MS 6u
+#define KL_ESPNOW_MIN_TX_GAP_MS 1u
 /** Сколько раз повторяем кадр, прежде чем выбросить его из очереди. */
 #define KL_ESPNOW_MAX_RETRIES 3u
-/** Очередь ожидания: 16 кадров достаточно для двух модулей на столе. */
-#define KL_ESPNOW_TX_QUEUE 16u
+/** Очередь ожидания: 48 кадров — разрешает поток при быстром pacing (1 мс). */
+#define KL_ESPNOW_TX_QUEUE 48u
 
 class EspNowInterface : public INetInterface {
  public:
@@ -38,7 +38,7 @@ class EspNowInterface : public INetInterface {
   uint32_t txOk() const { return tx_ok_; }
   uint32_t txErr() const { return tx_err_; }
   int lastTxErr() const { return last_tx_err_; }
-  uint16_t getMTU() const override { return 240; }
+  uint16_t getMTU() const override { return 228; }
   int8_t getLinkQuality() const override;
   uint8_t id() const override { return KL_IFACE_ESPNOW; }
   void setReceiveCallback(kl_rx_callback_t cb, void *ctx) override;

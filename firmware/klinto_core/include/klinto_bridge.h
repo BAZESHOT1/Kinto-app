@@ -144,6 +144,22 @@ class KlintoClientBridge {
     uint8_t data[KL_CLIENT_MAX_FRAME];
   };
 
+  /** LoRA-фрагментация: собираем пока всё не пришло — отдаём deliver_mesh_reassembled(). */
+  struct Reasm {
+    bool used;
+    uint64_t msg_uuid;
+    uint32_t src_id;
+    uint32_t packet_id;
+    uint8_t total;
+    uint8_t got;
+    uint8_t lens[8];                 /* длина по frag_index */
+    uint8_t chunk[KL_MAX_PAYLOAD];   /* всего 8 фрагментов по индексу */
+  };
+
+  Reasm *reasm_add(const kl_packet_t *pkt);
+  void reasm_free(Reasm *r);
+  void deliver_mesh_reassembled(const kl_packet_t *pkt);
+
   struct StatusEvt {
     uint64_t msg_uuid;
     uint32_t packet_id;
@@ -159,6 +175,7 @@ class KlintoClientBridge {
   kl_bridge_sink_t sink_;
   uint16_t seq_;
   FragSlot frags_[2];
+  Reasm reasm_[8];
   uint8_t rx_buf_[KL_CLIENT_MAX_FRAME];
   size_t rx_len_;
   uint32_t last_flush_ms_;

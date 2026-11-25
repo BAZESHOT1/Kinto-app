@@ -194,11 +194,46 @@ bool KlintoRouter::transmit(const kl_packet_t *pkt, uint8_t iface, uint32_t next
   (void)now_ms;
   if (!sink_.send) return false;
   if (!(iface_mask_ & (1u << iface))) return false;
+  /* Переход LoRA: если полезная нагрузка больше поддерживаемого LoRA-пакета —
+   * фрагментируем (ESP-NOW передаёт больше, ретрансляторы имеют возможность передать начало). */
+  if (iface == KL_IFACE_LORA && pkt->payload_len > KL_LORA_FRAG_MAX) {
+    bool any = false;
+    const uint8_t total = (uint8_t)((pkt->payload_len + KL_LORA_FRAG_MAX - 1) / KL_LORA_FRAG_MAX);
+    kl_packet_t frag;
+    for (uint8_t i = 0; i < total; ++i) {
+      const size_t off = (size_t)i * KL_LORA_FRAG_MAX;
+      const size_t left = (size_t)pkt->payload_len - off;
+      const size_t n = left < KL_LORA_FRAG_MAX ? left : KL_LORA_FRAG_MAX;
+      memset(&frag, 0, sizeof(frag));
+      frag.magic = pkt->magic;
+      frag.version = pkt->version;
+      frag.packet_id = pkt->packet_id;
+      frag.msg_uuid = pkt->msg_uuid;
+      frag.src_id = pkt->src_id;
+      frag.dst_id = pkt->dst_id;
+      frag.next_hop_id = next_hop;
+      frag.last_hop_id = cfg_.node_id;
+      frag.type = pkt->type;
+      frag.flags = (uint8_t)(pkt->flags | KL_FLAG_FRAGMENTED);
+      frag.ttl = pkt->ttl;
+      frag.hop_count = pkt->hop_count;
+      frag.frag_index = i;
+      frag.frag_total = total;
+      frag.payload_len = (uint8_t)n;
+      memcpy(frag.payload, pkt->payload + off, n);
+      if (!sink_.send(sink_.ctx, &frag, iface, next_hop)) continue;
+      stats_.tx_packets++;
+      last_tx_iface_ = iface;
+      any = true;
+    }
+    return any;
+  }
   kl_packet_t copy = *pkt;
   copy.next_hop_id = next_hop;
   copy.last_hop_id = cfg_.node_id;
   if (!sink_.send(sink_.ctx, &copy, iface, next_hop)) return false;
   stats_.tx_packets++;
+  last_tx_iface_ = iface;
   return true;
 }
 
@@ -456,6 +491,8 @@ void KlintoRouter::handle_beacon(const kl_packet_t *pkt, uint8_t iface, int16_t 
 
   learn_neighbor(relay_id, iface, rssi, now_ms, pkt->hop_count, true);
   if (relay_id != gateway_id) learn_neighbor(gateway_id, iface, rssi, now_ms, pkt->hop_count, true);
+  /* Возраст кластерного шлюза (для отчёта пользователю). */
+  stats_.gw_age_ms = now_ms - last_beacon_ms_;
 
   const uint8_t hops = pkt->hop_count;
   const bool better = !gw_.valid || hops < gw_.hops || (hops == gw_.hops && rssi > gw_.rssi + 6);
