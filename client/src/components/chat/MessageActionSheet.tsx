@@ -1,9 +1,8 @@
 import React from 'react';
-import { Modal, Platform, Pressable, ScrollView, StyleSheet, Text, View, useWindowDimensions } from 'react-native';
+import { Platform, Pressable, ScrollView, StyleSheet, Text, View, useWindowDimensions } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import * as Haptics from 'expo-haptics';
 import { MotiView } from 'moti';
-import { BlurView } from 'expo-blur';
 import { useTheme } from '../../theme/useTheme';
 import type { ViewMessage } from '../../data/messaging';
 
@@ -77,23 +76,9 @@ export function MessageActionSheet({
     : '';
   const icon: keyof typeof Ionicons.glyphMap = message?.kind === 'media' ? 'image-outline' : 'chatbubble-ellipses-outline';
 
+  if (!open) return null;
   return (
-    <Modal visible={open} transparent animationType="fade" onRequestClose={onClose}>
       <View style={styles.root}>
-        <Pressable
-          style={[StyleSheet.absoluteFill, { backgroundColor: theme.overlay }]}
-          onPress={onClose}
-          accessibilityRole="button"
-          accessibilityLabel="Закрыть меню сообщения"
-        >
-          {/* Размытие фона одновременно с подъёмом сообщения и выездом меню. */}
-          <BlurView
-            intensity={40}
-            tint={theme.dark ? 'dark' : 'light'}
-            style={StyleSheet.absoluteFill}
-            pointerEvents="none"
-          />
-        </Pressable>
         {message ? (
           <MotiView
             from={{ opacity: 0, translateY: 36, scale: 0.98 }}
@@ -181,7 +166,6 @@ export function MessageActionSheet({
           </MotiView>
         ) : null}
       </View>
-    </Modal>
   );
 }
 

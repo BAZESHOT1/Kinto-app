@@ -13,12 +13,14 @@ import {
   type NativeSyntheticEvent,
   Platform,
   Pressable,
+  ScrollView,
   Text,
   TextInput,
   View,
   StyleSheet,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import { BlurView } from 'expo-blur';
 import { MotiView } from 'moti';
 import { FlashList } from '@shopify/flash-list';
 import { KeyboardAvoidingView as KCKeyboardAvoidingView } from 'react-native-keyboard-controller';
@@ -178,6 +180,11 @@ function ChatScreen({ forcedId }: { forcedId?: string } = {}) {
   const [sheetMessage, setSheetMessage] = useState<ViewMessage | null>(null);
   const [reactionTarget, setReactionTarget] = useState<ViewMessage | null>(null);
   const [menuAnchor, setMenuAnchor] = useState<{ x: number; y: number; width: number; height: number } | null>(null);
+  const closeHoldMenu = React.useCallback(() => {
+    setReactionTarget(null);
+    setSheetMessage(null);
+    setMenuAnchor(null);
+  }, []);
   const [menuOpen, setMenuOpen] = useState(false);
   const [activeCall, setActiveCall] = useState<{
     id: string; startedAt: number; durationMs: number; participants: number;
@@ -1825,7 +1832,10 @@ function ChatScreen({ forcedId }: { forcedId?: string } = {}) {
                       onOpenMenu={(frame) => {
                         if (Platform.OS === 'web') (globalThis as { getSelection?: () => Selection | null }).getSelection?.()?.removeAllRanges();
                         setMenuAnchor(frame);
+                        // Оба меню открываются ОДНОВРЕМЕННО: реакции над
+                        // сообщением, действия под ним (как в Telegram).
                         setReactionTarget(row.m);
+                        setSheetMessage(row.m);
                       }}
                       quoted={quotedFor(row.m)}
                       onQuotePress={() => {
@@ -2311,36 +2321,46 @@ function ChatScreen({ forcedId }: { forcedId?: string } = {}) {
           creatingSecret={creatingSecret}
         />
 
-        <ReactionPicker
-          visible={Boolean(reactionTarget)}
-          anchor={menuAnchor}
-          onClose={() => { setReactionTarget(null); setMenuAnchor(null); }}
-          onPick={(emoji) => {
-            if (reactionTarget) void reactTo(reactionTarget, emoji);
-            setReactionTarget(null);
-          }}
-          onMore={() => {
-            const target = reactionTarget;
-            setReactionTarget(null);
-            // Даём модалке реакций закрыться, иначе iOS не показывает вторую.
-            setTimeout(() => setSheetMessage(target), 260);
-          }}
-        />
+        <Modal
+          visible={Boolean(reactionTarget || sheetMessage)}
+          transparent
+          animationType="none"
+          onRequestClose={closeHoldMenu}
+        >
+          <Pressable style={StyleSheet.absoluteFill} onPress={closeHoldMenu} accessibilityRole="button" accessibilityLabel="Закрыть меню сообщения">
+            <BlurView
+              intensity={40}
+              tint={theme.dark ? 'dark' : 'light'}
+              style={StyleSheet.absoluteFill}
+              pointerEvents="none"
+            />
+          </Pressable>
+          <ReactionPicker
+            visible={Boolean(reactionTarget)}
+            anchor={menuAnchor}
+            onClose={closeHoldMenu}
+            onPick={(emoji) => {
+              if (reactionTarget) void reactTo(reactionTarget, emoji);
+              closeHoldMenu();
+            }}
+            onMore={closeHoldMenu}
+          />
 
         <MessageActionSheet
           message={sheetMessage}
           anchor={menuAnchor}
           pinned={Boolean(sheetMessage && pinned?.id === sheetMessage.id)}
           allowCopy={true}
-          onClose={() => { setSheetMessage(null); setMenuAnchor(null); }}
-          onReact={(emoji) => sheetMessage && void reactTo(sheetMessage, emoji)}
-          onReply={() => sheetMessage && startReply(sheetMessage)}
-          onCopy={() => sheetMessage && void copyMessageText(sheetMessage.text ?? '')}
-          onEdit={() => sheetMessage && startEdit(sheetMessage)}
-          onDelete={() => sheetMessage && confirmDelete(sheetMessage)}
-          onPin={() => void pinMessage(sheetMessage)}
-          onRetry={() => sheetMessage && void retryMessage(sheetMessage)}
+          onReact={(emoji) => { if (sheetMessage) void reactTo(sheetMessage, emoji); closeHoldMenu(); }}
+          onReply={() => { if (sheetMessage) startReply(sheetMessage); closeHoldMenu(); }}
+          onCopy={() => { if (sheetMessage) void copyMessageText(sheetMessage.text ?? ''); closeHoldMenu(); }}
+          onEdit={() => { if (sheetMessage) startEdit(sheetMessage); closeHoldMenu(); }}
+          onDelete={() => { if (sheetMessage) confirmDelete(sheetMessage); closeHoldMenu(); }}
+          onPin={() => { void pinMessage(sheetMessage); closeHoldMenu(); }}
+          onRetry={() => { if (sheetMessage) void retryMessage(sheetMessage); closeHoldMenu(); }}
+          onClose={closeHoldMenu}
         />
+        </Modal>
 
         <AttachmentsGallery visible={galleryOpen} messages={allMessages} onClose={() => setGalleryOpen(false)} />
 

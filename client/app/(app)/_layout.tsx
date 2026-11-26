@@ -5,6 +5,12 @@ import { AppShell } from '../../src/components/AppShell';
 import { useStore } from '../../src/state/useStore';
 import { useTheme } from '../../src/theme/useTheme';
 
+/** Нативный жест назад доступен всем экранам, кроме корневых вкладок. */
+const backGesture = {
+  gestureEnabled: true,
+  fullScreenGestureEnabled: false,
+} as const;
+
 /** Каркас приложения: маршрут без сессии всегда уводит на /login. */
 export default function AppLayout() {
   const pathname = usePathname();
@@ -48,26 +54,28 @@ export default function AppLayout() {
           options={{ gestureEnabled: false, fullScreenGestureEnabled: false }}
         />
         <Stack.Screen name="settings" options={{ gestureEnabled: false, fullScreenGestureEnabled: false }} />
-        <Stack.Screen name="settings/params" />
-        <Stack.Screen name="settings/notifications" />
-        <Stack.Screen name="settings/appearance" />
-        <Stack.Screen name="settings/network" />
-        <Stack.Screen name="settings/security" />
-        <Stack.Screen name="settings/privacy" />
-        <Stack.Screen name="settings/about" />
-        <Stack.Screen name="settings/logs" />
-        <Stack.Screen name="modules" />
-        <Stack.Screen name="modules-add" />
-        <Stack.Screen name="firmware" />
-        <Stack.Screen name="nodes" />
-        <Stack.Screen name="language" />
-        <Stack.Screen name="admin" />
-        <Stack.Screen name="chat/[id]" />
-        <Stack.Screen name="chat/[id]/call" options={{ presentation: 'modal', animation: 'slide_from_bottom', gestureEnabled: true }} />
-        <Stack.Screen name="chat/[id]/info" />
-        <Stack.Screen name="user/[username]" />
-        <Stack.Screen name="user/[username]/edit" />
-        <Stack.Screen name="compose" options={{ presentation: 'modal', animation: 'slide_from_bottom', gestureEnabled: true }} />
+        {/* Все экраны, кроме корневых «Чаты»/«Настройки», поддерживают
+            нативный жест назад от левого края (iOS edge swipe). */}
+        <Stack.Screen name="settings/params" options={backGesture} />
+        <Stack.Screen name="settings/notifications" options={backGesture} />
+        <Stack.Screen name="settings/appearance" options={backGesture} />
+        <Stack.Screen name="settings/network" options={backGesture} />
+        <Stack.Screen name="settings/security" options={backGesture} />
+        <Stack.Screen name="settings/privacy" options={backGesture} />
+        <Stack.Screen name="settings/about" options={backGesture} />
+        <Stack.Screen name="settings/logs" options={backGesture} />
+        <Stack.Screen name="modules" options={backGesture} />
+        <Stack.Screen name="modules-add" options={backGesture} />
+        <Stack.Screen name="firmware" options={backGesture} />
+        <Stack.Screen name="nodes" options={backGesture} />
+        <Stack.Screen name="language" options={backGesture} />
+        <Stack.Screen name="admin" options={backGesture} />
+        <Stack.Screen name="chat/[id]" options={backGesture} />
+        <Stack.Screen name="chat/[id]/call" options={{ ...backGesture, presentation: 'modal', animation: 'slide_from_bottom' }} />
+        <Stack.Screen name="chat/[id]/info" options={backGesture} />
+        <Stack.Screen name="user/[username]" options={backGesture} />
+        <Stack.Screen name="user/[username]/edit" options={backGesture} />
+        <Stack.Screen name="compose" options={{ ...backGesture, presentation: 'modal', animation: 'slide_from_bottom' }} />
       </Stack>
     </AppShell>
   );

@@ -17,6 +17,7 @@ firebase.initializeApp({
 });
 
 const messaging = firebase.messaging();
+const recentNotifications = new Map();
 
 messaging.onBackgroundMessage((payload) => {
   const notification = payload.notification || {};
@@ -26,7 +27,12 @@ messaging.onBackgroundMessage((payload) => {
 
   // Стабильный tag сворачивает дубли в одну системную нотификацию даже если
   // сообщение пришло и через SW, и через открытую вкладку.
-  const tag = String(data.messageId || data.message_id || data.chatId || data.chat_id || 'kinto');
+  const messageId = data.messageId || data.message_id;
+  const tag = String(messageId || data.chatId || data.chat_id || 'kinto');
+  const now = Date.now();
+  for (const [key, at] of recentNotifications) if (now - at > 10_000) recentNotifications.delete(key);
+  if (messageId && recentNotifications.has(String(messageId))) return;
+  if (messageId) recentNotifications.set(String(messageId), now);
   return self.registration.showNotification(title, {
     body: body,
     data: data,

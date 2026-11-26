@@ -21,9 +21,15 @@
 #ifndef KL_NEIGHBOR_TABLE
 #define KL_NEIGHBOR_TABLE 64
 #endif
+#ifndef KL_PENDING_QUEUE
 #define KL_PENDING_QUEUE 12
+#endif
+#ifndef KL_ACK_TABLE
 #define KL_ACK_TABLE 16
+#endif
+#ifndef KL_BCAST_QUEUE
 #define KL_BCAST_QUEUE 8
+#endif
 #define KL_RREQ_RETRY_MS 2500u
 #define KL_RREQ_MAX_TRIES 3
 #define KL_CAP_MOBILE_GW 0x04

@@ -4,7 +4,7 @@
  * На web подавляет выделение текста и контекстное меню браузера.
  */
 import React from 'react';
-import { Modal, Pressable, Text, View, StyleSheet, Platform, useWindowDimensions } from 'react-native';
+import { Text, View, StyleSheet, Platform, useWindowDimensions } from 'react-native';
 import { MotiView } from 'moti';
 import { useTheme } from '../../theme/useTheme';
 import { useReducedMotion } from '../useReducedMotion';
@@ -44,9 +44,8 @@ export function ReactionPicker({
       : { bottom: screenH - anchor.y + 8 }
     : { top: screenH / 2 };
 
+  if (!visible) return null;
   return (
-    <Modal visible={visible} transparent animationType="none" onRequestClose={onClose}>
-      <Pressable style={styles.backdrop} onPress={onClose} accessibilityLabel="Закрыть меню реакций">
         <View pointerEvents="box-none" style={StyleSheet.absoluteFill}>
           <MotiView
             from={{ opacity: 0, scale: reduced ? 1 : 0.82, translateY: reduced ? 0 : 12 }}
@@ -99,8 +98,6 @@ export function ReactionPicker({
             </PressableScale>
           </MotiView>
         </View>
-      </Pressable>
-    </Modal>
   );
 }
 

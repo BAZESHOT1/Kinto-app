@@ -38,6 +38,7 @@ import { isPushContentHidden } from './pushPrefs';
 const noop: WebPushCleanup = () => undefined;
 
 let vapidWarned = false;
+const recentNotifications = new Map<string, number>();
 
 function isWebPushSupported(): boolean {
   if (typeof window === 'undefined') return false;
@@ -149,7 +150,8 @@ async function doRegisterWebPush(
     // Foreground-сообщения (вкладка в фокусе) FCM не показывает сам.
     // Одно сообщение может прийти дважды (FCM-токен ротируется, старый токен
     // остаётся активным, поэтому multicast доставляет дубль ~через секунду).
-    const recent = new Map<string, number>();
+    // Общий дедупликатор на вкладку (живёт между перерегистрациями).
+    const recent = recentNotifications;
     const dedupeKey = (data: Record<string, unknown> | undefined, title: string, body: string) =>
       String(data?.messageId ?? data?.message_id ?? `${data?.chatId ?? ''}|${title}|${body}`);
 
