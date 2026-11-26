@@ -74,6 +74,7 @@ function profileUrl(username: string): string {
 /** Страница профиля: свой — профильные блоки, чужой — действия и приглашения. */
 export default function UserProfileScreen() {
   const theme = useTheme();
+  const shellInsets = useSafeAreaInsets();
   const router = useRouter();
   const params = useLocalSearchParams<{ username: string }>();
   const username = String(params.username ?? '').trim();
@@ -354,7 +355,13 @@ export default function UserProfileScreen() {
       {/* Фон профиля неподвижен и занимает весь экран; без своего фото — прозрачный. */}
       <Wallpaper image={profile.background ?? null} bleed />
       <ScrollView
-        contentContainerStyle={{ flexGrow: 1, paddingBottom: 120 }}
+        contentContainerStyle={{
+          flexGrow: 1,
+          paddingBottom: 120,
+          // Компенсируем постоянный отступ AppShell: профиль сам задаёт
+          // safe-area через topPad, иначе отступ сверху удваивался.
+          marginTop: -((shellInsets.top || 12) + 12),
+        }}
         showsVerticalScrollIndicator={false}
         refreshControl={
           <RefreshControl

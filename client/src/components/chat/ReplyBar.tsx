@@ -26,7 +26,7 @@ export function ReplyBar({
       from={{ opacity: 0, translateY: 8 }}
       animate={{ opacity: 1, translateY: 0 }}
       transition={reduced ? { type: 'timing', duration: 0 } : motion.softSpring}
-      style={[styles.wrap, { backgroundColor: theme.surfaceElevated, borderColor: theme.line }]}
+      style={[styles.wrap, { backgroundColor: 'transparent', borderColor: theme.line }]}
     >
       <View style={{ width: 3, alignSelf: 'stretch', borderRadius: 2, backgroundColor: mode === 'edit' ? theme.accent : theme.success }} />
       <Ionicons

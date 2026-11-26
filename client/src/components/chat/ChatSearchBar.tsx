@@ -42,7 +42,7 @@ export function ChatSearchBar({
       transition={reduced ? { type: 'timing', duration: 0 } : motion.softSpring}
       style={styles.wrap}
     >
-      <View style={[styles.bar, { backgroundColor: theme.surface, borderColor: theme.line }]}>
+      <View style={[styles.bar, { backgroundColor: 'transparent', borderColor: theme.line }]}>
         <Ionicons name="search" size={16} color={theme.textDisabled} />
         <TextInput
           ref={inputRef}

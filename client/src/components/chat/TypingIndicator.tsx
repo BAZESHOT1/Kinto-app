@@ -11,7 +11,7 @@ export function TypingIndicator({ username }: { username: string }) {
       from={{ opacity: 0, translateY: 6, scale: 0.96 }}
       animate={{ opacity: 1, translateY: 0, scale: 1 }}
       transition={{ type: 'spring', damping: 24, stiffness: 300 }}
-      style={[styles.pill, { backgroundColor: theme.surfaceElevated, borderColor: theme.line }]}
+      style={[styles.pill, { backgroundColor: 'transparent', borderColor: theme.line }]}
       accessibilityLiveRegion="polite"
     >
       <View style={styles.dots}>

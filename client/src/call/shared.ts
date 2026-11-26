@@ -16,10 +16,12 @@ export async function createCallOffer(
   const track = stream.getAudioTracks()[0];
   if (!track) throw new Error('microphone_unavailable');
   // Ограничиваем битрейт sending-тренсceiver под выбранный канал.
-  // RTCPeerConnection.addTrack() возвращает RTCRtpSender (НЕ массив).
-  // Деструктуризация `[sender] = pc.addTrack(...)` бросала
-  // "TypeError: ... is not iterable" при каждом запуске звонка.
-  const sender = stream.getAudioTracks().length ? pc.addTrack(track, stream) : null;
+  // RTCPeerConnection.addTrack() возвращает RTCRtpSender (НЕ массив) и
+  // всегда вызывается для выбранного трека. Ранее здесь было
+  // `const [sender] = length ? pc.addTrack(...) : []` — V8 выдавал ровно
+  // "TypeError: (intermediate value)(intermediate value)(intermediate value)
+  // is not iterable". Условное выражение убрано полностью.
+  const sender = pc.addTrack(track, stream);
   if (sender && typeof sender.setParameters === 'function') {
     const params = sender.getParameters();
     const { min, max } = CALL_BITRATE[channel];

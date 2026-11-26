@@ -1880,7 +1880,7 @@ function ChatScreen({ forcedId }: { forcedId?: string } = {}) {
     <Avoider
       style={{
         flex: 1,
-        backgroundColor: theme.background,
+        backgroundColor: 'transparent', // фон рисует AppShell/обои — шапка и ввод прозрачные
         // iOS: явно уменьшаем высоту экрана на высоту клавиатуры.
         // KAV padding в связке с react-native-screens иногда не срабатывает,
         // поэтому используем проверенный явный отступ.
@@ -1894,6 +1894,10 @@ function ChatScreen({ forcedId }: { forcedId?: string } = {}) {
         style={{
           flex: 1,
           backgroundColor: 'transparent',
+          // AppShell даёт постоянный safe-area отступ ради плавности переходов.
+          // Чат компенсирует его сам (раньше оболочка обнуляла отступ только
+          // для чата), чтобы шапка не опускалась двойным отступом.
+          marginTop: -((insets.top || 12) + 12),
           // Акцентная рамка вокруг экрана секретного чата.
           borderWidth: secret ? 1.5 : 0,
           borderColor: secret ? theme.accent : 'transparent',
@@ -2155,7 +2159,7 @@ function ChatScreen({ forcedId }: { forcedId?: string } = {}) {
             hitSlop={6}
             style={({ pressed }) => ({ opacity: pressed ? 0.65 : 1 })}
           >
-            <Glass radius={26} fill={GLASS_FILL_BUTTON} style={styles.attach}>
+            <Glass transparent radius={26} fill={GLASS_FILL_BUTTON} style={styles.attach}>
               <MotiView
                 animate={{ rotate: attachOpen ? '45deg' : '0deg' }}
                 transition={reduced ? { type: 'timing', duration: 0 } : motion.softSpring}
@@ -2198,7 +2202,7 @@ function ChatScreen({ forcedId }: { forcedId?: string } = {}) {
             style={[
               styles.input,
               {
-                backgroundColor: theme.glassUi === false ? theme.surface : theme.dark ? 'rgba(255,255,255,0.10)' : 'rgba(255,255,255,0.75)',
+                backgroundColor: 'transparent', // поле ввода прозрачное — фон чата просвечивает
                 color: theme.textPrimary,
                 borderColor: editing ? theme.accent : theme.dark ? 'rgba(255,255,255,0.10)' : 'rgba(0,0,0,0.08)',
                 maxWidth: 860,

@@ -35,6 +35,8 @@ type GlassProps = ViewProps & {
   intensity?: number;
   /** Тон материала iOS. */
   tint?: 'light' | 'dark' | 'default';
+  /** Полностью прозрачная поверхность: без размытия, заливки и обводки. */
+  transparent?: boolean;
 };
 
 export function Glass({
@@ -46,8 +48,23 @@ export function Glass({
   borderWidth = 1,
   intensity = 48,
   tint,
+  transparent = false,
   ...rest
 }: GlassProps) {
+  if (transparent) {
+    return (
+      <View
+        {...rest}
+        style={[
+          styles.base,
+          { borderRadius: radius, borderWidth: 0, borderColor: 'transparent', backgroundColor: 'transparent' },
+          style,
+        ]}
+      >
+        {children}
+      </View>
+    );
+  }
   const web = Platform.OS === 'web';
   const theme = useTheme();
   const light = !theme.dark;

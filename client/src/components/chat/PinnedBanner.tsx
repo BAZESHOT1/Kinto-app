@@ -22,7 +22,7 @@ export function PinnedBanner({
       from={{ opacity: 0, translateY: -8 }}
       animate={{ opacity: 1, translateY: 0 }}
       transition={{ type: 'spring', damping: 24, stiffness: 300 }}
-      style={[styles.wrap, { backgroundColor: theme.surfaceElevated, borderColor: theme.line }]}
+      style={[styles.wrap, { backgroundColor: 'transparent', borderColor: theme.line }]}
     >
       <Pressable
         onPress={onPress}

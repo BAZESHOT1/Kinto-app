@@ -245,7 +245,7 @@ export function VoiceRecorder({
           style={styles.timerPill}
           pointerEvents="box-none"
         >
-          <Glass radius={18} fill={GLASS_FILL_BUTTON} style={styles.timerInner}>
+          <Glass transparent radius={18} fill={GLASS_FILL_BUTTON} style={styles.timerInner}>
             <MotiView
               from={{ opacity: 1 }}
               animate={{ opacity: reduced ? 1 : 0.25 }}
@@ -272,7 +272,7 @@ export function VoiceRecorder({
 
       {phase === 'holding' ? (
         <Animated.View style={[styles.lockHint, { transform: [{ translateY: lift }] }]} pointerEvents="none">
-          <Glass radius={18} fill={GLASS_FILL_BUTTON} style={styles.lockInner}>
+          <Glass transparent radius={18} fill={GLASS_FILL_BUTTON} style={styles.lockInner}>
             <Ionicons name="lock-open-outline" size={15} color={theme.textPrimary} />
             <MotiView
               from={{ translateY: 3, opacity: 0.5 }}
@@ -293,6 +293,7 @@ export function VoiceRecorder({
       >
         <MotiView animate={{ scale: phase === 'holding' ? 1.25 : 1 }} transition={{ type: 'spring', damping: 14, stiffness: 260 }}>
           <Glass
+            transparent={!recording}
             radius={26}
             fill={recording ? theme.accent : GLASS_FILL_BUTTON}
             borderColor={recording ? theme.accent : undefined}
