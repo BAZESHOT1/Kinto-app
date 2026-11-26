@@ -24,7 +24,23 @@ import {
 
 export interface MessagePayload {
   text?: string;
-  file?: { id: string; key: string; name: string; mime: string; size: number };
+  /** Первое вложение (обратная совместимость) + полный набор до 10 файлов. */
+  file?: {
+    id: string;
+    key: string;
+    name: string;
+    mime: string;
+    size: number;
+    duration?: number;
+  };
+  files?: Array<{
+    id: string;
+    key: string;
+    name: string;
+    mime: string;
+    size: number;
+    duration?: number;
+  }>;
 }
 
 export async function saveChatKeyLocal(chatId: string, raw: Uint8Array): Promise<void> {

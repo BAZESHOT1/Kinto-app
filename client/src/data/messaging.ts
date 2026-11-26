@@ -59,6 +59,8 @@ export interface ViewMessage {
   kind: string;
   text?: string;
   file?: MessagePayload['file'];
+  /** Несколько вложений в одном сообщении (до 10). */
+  files?: MessagePayload['files'];
   imageUri?: string;
   replyTo?: string | null;
   edited?: boolean;
@@ -255,6 +257,7 @@ export async function sendMessage(
         kind,
         text: payload.text,
         file: payload.file,
+        files: payload.files,
         replyTo: opts.replyTo ?? null,
         // Обычный чат остаётся серверным и через kMesh: замка у сообщения быть не должно.
         scheme: opts.scheme ?? 'server',
@@ -336,6 +339,7 @@ export async function sendMessage(
     kind,
     text: payload.text,
     file: payload.file,
+    files: payload.files,
     replyTo: opts.replyTo ?? null,
     scheme: header.scheme,
     reactions: [],
@@ -351,6 +355,7 @@ export async function sendMessage(
     senderUsername?: string;
     text?: string;
     file?: unknown;
+    files?: unknown;
     replyTo?: string;
   } = {
     id: clientId,
@@ -367,6 +372,7 @@ export async function sendMessage(
     senderUsername: myUsername,
     text: payload.text,
     file: payload.file,
+    files: payload.files,
     replyTo: opts.replyTo,
   };
 
@@ -463,6 +469,7 @@ async function localFallback(
     // отправим после синхронизации ключей.
     text: payload.text,
     file: payload.file,
+    files: payload.files,
     failed: false,
     delivered: false,
     pending: true,
@@ -670,6 +677,7 @@ async function decryptWithKey(env: Envelope, rawKey: Uint8Array | null, myUserna
     ...common,
     text: payload?.text ?? '',
     file: payload?.file,
+    files: payload?.files,
     delivered: true,
     failed: !payload,
     pending: false,
@@ -759,7 +767,7 @@ export async function loadChatMessages(chat: Chat, myUsername: string, limit = 6
   try {
     for (const item of await listOutbox()) {
       if (item.chatId !== chat.id || !item.clientId || confirmedClients.has(item.clientId)) continue;
-      const extra = item as OutboxItem & { text?: string; file?: ViewMessage['file']; replyTo?: string };
+      const extra = item as OutboxItem & { text?: string; file?: ViewMessage['file']; files?: ViewMessage['files']; replyTo?: string };
       pending.push({
         id: item.clientId,
         clientId: item.clientId,
@@ -770,6 +778,7 @@ export async function loadChatMessages(chat: Chat, myUsername: string, limit = 6
         kind: item.kind,
         text: extra.text,
         file: extra.file,
+        files: extra.files,
         replyTo: extra.replyTo ?? null,
         scheme: 'server',
         reactions: [],
@@ -897,6 +906,7 @@ export function envelopeToView(
     kind: env.kind,
     text: payload?.text ?? '',
     file: payload?.file,
+    files: payload?.files,
     delivered: env.delivered ?? true,
     read: env.read ?? false,
     msgUuid: env.msgUuid,
@@ -933,6 +943,88 @@ function bytesToDataUri(bytes: Uint8Array, mime: string): string | undefined {
  * Сжатие всегда до шифрования, поэтому E2EE не страдает.
  */
 export async function attachAndSendWithProgress(
+  chatId: string,
+  file: { bytes: Uint8Array; name: string; mime: string; duration?: number },
+  myUsername: string,
+  opts: AttachSendOptions = {},
+  callbacks: AttachProgressCallbacks = {},
+): Promise<ViewMessage> {
+  return attachManyAndSendWithProgress(chatId, [file], '', myUsername, opts, callbacks);
+}
+
+/**
+ * kMesh v2-совместимая отправка: до 10 вложений + текст в ОДНОМ сообщении.
+ * Каждый файл шифруется и раскладывается по узлам отдельно, но в чате
+ * получается одна запись с текстом и стопкой вложений.
+ */
+export async function attachManyAndSendWithProgress(
+  chatId: string,
+  files: Array<{ bytes: Uint8Array; name: string; mime: string; duration?: number }>,
+  text: string,
+  myUsername: string,
+  opts: AttachSendOptions = {},
+  callbacks: AttachProgressCallbacks = {},
+): Promise<ViewMessage> {
+  try {
+    assertMediaTransport();
+    if (!files.length) throw new Error('no_files');
+    if (files.length > 10) throw new Error('too_many_files');
+    const prepared: NonNullable<MessagePayload['files']> = [];
+    for (let i = 0; i < files.length; i += 1) {
+      const file = files[i]!;
+      if (opts.signal?.aborted) throw abortError();
+      callbacks.onStage?.('compress');
+      callbacks.onProgress?.(i / files.length);
+      const preview = bytesToDataUri(file.bytes, file.mime);
+      if (preview && i === 0) callbacks.onPreview?.(preview);
+
+      let compressed: { bytes: Uint8Array; mime: string } = { bytes: file.bytes, mime: file.mime };
+      if (file.mime.toLowerCase().startsWith('image/')) {
+        try {
+          const res = await compressImage(file.bytes, file.mime, { avatar: opts.avatar });
+          compressed = { bytes: res.bytes, mime: res.mime };
+          if (res.bytes !== file.bytes && i === 0) {
+            const p = bytesToDataUri(res.bytes, res.mime);
+            if (p) callbacks.onPreview?.(p);
+          }
+        } catch {
+          compressed = { bytes: file.bytes, mime: file.mime };
+        }
+      }
+      callbacks.onStage?.('encrypt');
+      const encrypted = encryptFileBytes(compressed.bytes);
+      const uploaded = await uploadBytesWithProgress(encrypted.bytes, {
+        onStage: (stage) => callbacks.onStage?.(stage),
+        onProgress: (progress) => callbacks.onProgress?.((i + progress) / files.length),
+        signal: opts.signal,
+      });
+      prepared.push({
+        id: uploaded.objectId,
+        key: toB64u(encrypted.rawKey),
+        name: file.name,
+        mime: compressed.mime,
+        size: compressed.bytes.length,
+        duration: file.duration,
+      });
+    }
+    const payload: MessagePayload = { text, file: prepared[0], files: prepared };
+    const message = await sendMessage(chatId, payload, 'media', myUsername, {
+      replyTo: opts.replyTo,
+      clientId: opts.clientId,
+      signal: opts.signal,
+      asChannel: opts.asChannel,
+    });
+    callbacks.onDone?.(message);
+    return message;
+  } catch (e) {
+    const err = e instanceof Error ? e : new Error(String(e));
+    callbacks.onError?.(err);
+    throw err;
+  }
+}
+
+/** Старый путь одного файла (используется VoiceRecorder и запасными вызовами). */
+export async function attachAndSendWithProgressLegacy(
   chatId: string,
   file: { bytes: Uint8Array; name: string; mime: string },
   myUsername: string,

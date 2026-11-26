@@ -233,10 +233,10 @@ export function SimpleFirmwareWizard({
       } catch (error) {
         if (cancelled) return;
         buildErrorCountRef.current += 1;
-        // 502/503/504 — транзиентный ответ прокси/HAProxy при переключении лидера БД.
-        // Не помечаем сборку проваленной: продолжаем опрос до честного 15-минутного таймаута.
+        // 500/502/503/504 — транзиентные ответы Hub/прокси при переключении
+        // лидера БД. Не помечаем сборку проваленной: продолжаем опрос.
         const message = error instanceof Error ? error.message : String(error);
-        const transient = /\(50[234]\)|502|503|504|temporarily|временно/.test(message);
+        const transient = /500|502|503|504|temporarily|временно/.test(message);
         if (!transient && buildErrorCountRef.current >= 5) {
           setBuildError(`Не удаётся получить статус сборки: ${message}. Нажмите «Повторить».`);
           setBuild((prev) => (prev ? { ...prev, status: 'failed' } : prev));

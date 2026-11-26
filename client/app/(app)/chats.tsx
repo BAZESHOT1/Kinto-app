@@ -1714,17 +1714,8 @@ export default function ChatsScreen() {
           if (!ok) await new Promise((resolve) => setTimeout(resolve, 1_500));
         }
         setMeshRefreshing(false);
-        if (ok) {
-          // Успех подтверждаем тихо: при втором подходе лента приходит без индикатора.
-        } else if (attempts >= 2) {
-          useStore.getState().pushToast({ kind: 'info', message: 'Hub не ответил через kMesh — данные обновлются позже.' });
-        }
-        if (!ok) {
-          useStore.getState().pushToast({
-            kind: 'info',
-            message: 'Нет интернета и связи с Hub через kMesh — показаны сохранённые чаты.',
-          });
-        }
+        // Статус соединения/обновления показываем ТОЛЬКО в шапке списка чатов.
+        // Всплывающие тосты при открытии чата убраны.
         return;
       }
       await Promise.allSettled([

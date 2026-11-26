@@ -1,5 +1,5 @@
 import { createCallOffer, type RtcFacade } from './shared';
-import type { CallChannel, CallJoiner, CallOfferResult } from './transport';
+import type { CallChannel, CallJoiner, CallOfferResult } from './constants';
 
 const rtc: RtcFacade = {
   peer: () => new RTCPeerConnection({ iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] }),

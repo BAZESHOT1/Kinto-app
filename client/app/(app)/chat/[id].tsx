@@ -34,7 +34,6 @@ import { EmptyState } from '../../../src/components/EmptyState';
 import { motion } from '../../../src/theme/motion';
 import { useReducedMotion } from '../../../src/components/useReducedMotion';
 import { ChatHeader, type ChatChannel } from '../../../src/components/chat/ChatHeader';
-import { NetworkBanner } from '../../../src/components/chat/NetworkBanner';
 import { ChatMenu } from '../../../src/components/chat/ChatMenu';
 import { ChatSearchBar } from '../../../src/components/chat/ChatSearchBar';
 import { PinnedBanner } from '../../../src/components/chat/PinnedBanner';
@@ -57,7 +56,7 @@ import { VoiceRecorder } from '../../../src/components/chat/VoiceRecorder';
 import { useChatMessages, humanError, useDeleteMessage, useSendChatMessage } from '../../../src/data/queries';
 import { useQueryClient } from '@tanstack/react-query';
 import {
-  attachAndSendWithProgress,
+  attachManyAndSendWithProgress,
   decryptEnvelopeAuto,
   decryptMany,
   retryOutboxItem,
@@ -1254,7 +1253,8 @@ function ChatScreen({ forcedId }: { forcedId?: string } = {}) {
   /* --- медиа: превью → сжатие → шифрование → загрузка с прогрессом --- */
   function performMediaUpload(
     clientId: string,
-    file: PickedFile,
+    files: PickedFile[],
+    text: string,
     replyId: string | undefined,
     controller: AbortController,
     postAsChannel: boolean,
@@ -1263,9 +1263,10 @@ function ChatScreen({ forcedId }: { forcedId?: string } = {}) {
     setError('');
     void (async () => {
       try {
-        const vm = await attachAndSendWithProgress(
+        const vm = await attachManyAndSendWithProgress(
           chatId,
-          file,
+          files,
+          text,
           myUsername,
           { clientId, replyTo: replyId, signal: controller.signal, asChannel: postAsChannel },
           {
@@ -1315,9 +1316,19 @@ function ChatScreen({ forcedId }: { forcedId?: string } = {}) {
     })();
   }
 
-  function startMediaUpload(file: PickedFile, replyId?: string) {
+  function startMediaUpload(input: PickedFile | PickedFile[], replyId?: string, text = '') {
+    const files = (Array.isArray(input) ? input : [input]).slice(0, 10);
+    if (!files.length) return;
     const clientId = makeClientId();
     const postAsChannel = isChannel ? true : asChannel && canPostAsChannel;
+    const attachments = files.map((f) => ({
+      id: f.id ?? '',
+      key: '',
+      name: f.name,
+      mime: f.mime,
+      size: f.bytes.length,
+      duration: f.duration,
+    }));
     const optimisticMessage: ViewMessage = {
       id: clientId,
       clientId,
@@ -1326,7 +1337,9 @@ function ChatScreen({ forcedId }: { forcedId?: string } = {}) {
       mine: true,
       createdAt: new Date().toISOString(),
       kind: 'media',
-      file: { id: '', key: '', name: file.name, mime: file.mime, size: file.bytes.length },
+      text: text || undefined,
+      file: attachments[0],
+      files: attachments,
       replyTo: replyId ?? null,
       scheme: isE2e ? 'e2e' : 'server',
       reactions: [],
@@ -1349,10 +1362,10 @@ function ChatScreen({ forcedId }: { forcedId?: string } = {}) {
       const next = new AbortController();
       uploadsRef.current.set(clientId, { controller: next, retry });
       patchOptimistic(clientId, { pending: true, failed: false, uploadStage: 'compress', uploadProgress: 0 });
-      performMediaUpload(clientId, file, replyId, next, postAsChannel);
+      performMediaUpload(clientId, files, text, replyId, next, postAsChannel);
     };
     uploadsRef.current.set(clientId, { controller, retry });
-    performMediaUpload(clientId, file, replyId, controller, postAsChannel);
+    performMediaUpload(clientId, files, text, replyId, controller, postAsChannel);
   }
 
   function retryUpload(clientId: string) {
@@ -1370,12 +1383,17 @@ function ChatScreen({ forcedId }: { forcedId?: string } = {}) {
     removeOptimistic(clientId);
   }
 
-  function onAttach(file: PickedFile) {
+  function onAttach(picked: PickedFile | PickedFile[]) {
     if (!canCompose) {
       setError(isE2e ? 'Ключ чата ещё не получен — медиа отправить нельзя.' : 'Чат ещё загружается — попробуйте через мгновение.');
       return;
     }
-    const proceed = () => startMediaUpload(file, replyTo?.id);
+    const files = (Array.isArray(picked) ? picked : [picked]).slice(0, 10);
+    if (!files.length) return;
+    const proceed = () => {
+      startMediaUpload(files, replyTo?.id, String(text ?? '').trim());
+      setText('');
+    };
     if (channel !== 'internet') {
       Alert.alert('Медиа только через интернет', 'Медиа будет отправлено, когда появится интернет. Продолжить?', [
         { text: 'Отмена', style: 'cancel' },
@@ -1414,17 +1432,17 @@ function ChatScreen({ forcedId }: { forcedId?: string } = {}) {
       e.preventDefault();
       depth = 0;
       setDragActive(false);
-      const file = e.dataTransfer?.files?.[0];
-      if (!file) return;
+      const files = Array.from(e.dataTransfer?.files ?? []).slice(0, 10);
+      if (!files.length) return;
       void (async () => {
         try {
-          const buffer = await file.arrayBuffer();
           setDropBusy(true);
-          onAttachRef.current({
+          const picked = await Promise.all(files.map(async (file) => ({
             name: file.name || 'file',
             mime: file.type || 'application/octet-stream',
-            bytes: new Uint8Array(buffer),
-          });
+            bytes: new Uint8Array(await file.arrayBuffer()),
+          })));
+          onAttachRef.current(picked);
         } catch {
           pushToast({ kind: 'error', message: 'Не удалось прочитать перетаскиваемый файл' });
         }
@@ -1768,6 +1786,7 @@ function ChatScreen({ forcedId }: { forcedId?: string } = {}) {
                     <MediaAlbum
                       messages={row.album}
                       mine={row.m.mine}
+                      post={isChannel}
                       role={row.m.mine ? myRole : rolesByUsername.get(row.m.senderUsername)}
                       channelTitle={
                         (row.m as ViewMessageExt).asChannel || (row.m.mine && asChannel && canPostAsChannel)
@@ -1811,6 +1830,7 @@ function ChatScreen({ forcedId }: { forcedId?: string } = {}) {
                     <MessageBubble
                       item={row.m}
                       group={row.group}
+                      post={isChannel}
                       onCopy={(t) => void copyText(t)}
                       onReply={() => startReply(row.m)}
                       onDelete={() => confirmDelete(row.m)}
@@ -2103,8 +2123,6 @@ function ChatScreen({ forcedId }: { forcedId?: string } = {}) {
             </Text>
           </MotiView>
         ) : null}
-
-        <NetworkBanner phase={connectionPhase} />
 
         {replyTo ? <ReplyBar mode="reply" username={replyTo.senderUsername} text={replyTo.text || replyTo.file?.name || 'Вложение'} onClose={cancelReplyOrEdit} /> : null}
         {editing ? <ReplyBar mode="edit" text={editing.text || ''} onClose={cancelReplyOrEdit} /> : null}

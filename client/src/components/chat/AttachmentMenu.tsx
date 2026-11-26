@@ -11,20 +11,25 @@ const WebInput = 'input' as unknown as React.FC<
   React.DetailedHTMLProps<React.InputHTMLAttributes<HTMLInputElement>, HTMLInputElement> & { ref?: React.Ref<HTMLInputElement> }
 >;
 
-async function pickNativeFile(accept?: string): Promise<PickedFile | null> {
+async function pickNativeFile(accept?: string): Promise<PickedFile[]> {
   try {
     const DocumentPicker = await import('expo-document-picker');
     const FS = await import('expo-file-system');
     const res = await DocumentPicker.getDocumentAsync({
       copyToCacheDirectory: true,
       type: accept ?? '*/*',
-    });
-    if (res.canceled || !res.assets?.length) return null;
-    const asset = res.assets[0];
-    const b64 = await FS.readAsStringAsync(asset.uri, { encoding: FS.EncodingType.Base64 });
-    return { name: asset.name, mime: asset.mimeType ?? 'application/octet-stream', bytes: fromB64(b64) };
+      multiple: true,
+      selectionLimit: 10,
+    } as never);
+    if (res.canceled || !res.assets?.length) return [];
+    const out: PickedFile[] = [];
+    for (const asset of res.assets.slice(0, 10)) {
+      const b64 = await FS.readAsStringAsync(asset.uri, { encoding: FS.EncodingType.Base64 });
+      out.push({ name: asset.name, mime: asset.mimeType ?? 'application/octet-stream', bytes: fromB64(b64) });
+    }
+    return out;
   } catch {
-    return null;
+    return [];
   }
 }
 
@@ -40,7 +45,7 @@ export function AttachmentMenu({
 }: {
   visible: boolean;
   onClose: () => void;
-  onPicked: (file: PickedFile) => void;
+  onPicked: (files: PickedFile | PickedFile[]) => void;
   /** Ошибка выбора (например, нет доступа к галерее). */
   onError?: (message: string) => void;
 }) {
@@ -54,10 +59,17 @@ export function AttachmentMenu({
   const cameraAvailable = web && typeof navigator !== 'undefined' && Boolean(navigator.mediaDevices);
 
   const readWeb = async (input: HTMLInputElement | null) => {
-    const f = input?.files?.[0];
-    if (!f) return;
-    const bytes = new Uint8Array(await f.arrayBuffer());
-    onPicked({ name: f.name || 'file', mime: f.type || 'application/octet-stream', bytes });
+    const list = Array.from(input?.files ?? []).slice(0, 10);
+    if (!list.length) return;
+    const picked: PickedFile[] = [];
+    for (const f of list) {
+      picked.push({
+        name: f.name || 'file',
+        mime: f.type || 'application/octet-stream',
+        bytes: new Uint8Array(await f.arrayBuffer()),
+      });
+    }
+    onPicked(picked);
     if (input) input.value = '';
     onClose();
   };
@@ -66,9 +78,9 @@ export function AttachmentMenu({
   const pickGallery = async () => {
     onClose();
     try {
-      const { pickFromGallery } = await import('../../data/galleryPicker');
-      const file = await pickFromGallery({ videos: true });
-      if (file) onPicked(file);
+      const { pickManyFromGallery } = await import('../../data/galleryPicker');
+      const files = await pickManyFromGallery({ videos: true, limit: 10 });
+      if (files.length) onPicked(files);
     } catch (e) {
       onError?.(e instanceof Error ? e.message : 'Не удалось открыть галерею');
     }
@@ -76,8 +88,8 @@ export function AttachmentMenu({
 
   const pickNative = async (accept?: string) => {
     onClose();
-    const file = await pickNativeFile(accept);
-    if (file) onPicked(file);
+    const files = await pickNativeFile(accept);
+    if (files.length) onPicked(files);
   };
 
   return (
@@ -131,8 +143,8 @@ export function AttachmentMenu({
 
           {web ? (
             <>
-              <WebInput ref={photoRef} type="file" accept="image/*" hidden onChange={() => void readWeb(photoRef.current)} />
-              <WebInput ref={fileRef} type="file" hidden onChange={() => void readWeb(fileRef.current)} />
+              <WebInput ref={photoRef} type="file" accept="image/*" multiple hidden onChange={() => void readWeb(photoRef.current)} />
+              <WebInput ref={fileRef} type="file" multiple hidden onChange={() => void readWeb(fileRef.current)} />
               <WebInput
                 ref={cameraRef}
                 type="file"

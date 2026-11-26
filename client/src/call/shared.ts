@@ -1,4 +1,5 @@
-import { CALL_BITRATE, type CallChannel, type CallJoiner, type CallOfferResult, type CallSession } from './transport';
+// only constants — platform files (transport.web/native) do not export these
+import { CALL_BITRATE, type CallChannel, type CallJoiner, type CallOfferResult, type CallSession } from './constants';
 
 /** Минимальный WebRTC-фасад, одинаковый для браузера и react-native-webrtc. */
 export interface RtcFacade {

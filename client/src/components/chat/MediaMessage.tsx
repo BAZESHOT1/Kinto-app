@@ -422,7 +422,8 @@ function MediaAudio({ item, width = MEDIA_W }: { item: ViewMessage; width?: numb
   const mine = Boolean(item.mine);
   const [playing, setPlaying] = React.useState(false);
   const [loading, setLoading] = React.useState(false);
-  const [duration, setDuration] = React.useState<number | null>(null);
+  // Длительность сохраняется при отправке — показываем сразу, а не 0:00.
+  const [duration, setDuration] = React.useState<number | null>(item.file?.duration ?? null);
   const [position, setPosition] = React.useState(0);
   const playerRef = React.useRef<VoicePlayer | null>(null);
   const bars = React.useMemo(() => waveOf(String(item.id), 30), [item.id]);

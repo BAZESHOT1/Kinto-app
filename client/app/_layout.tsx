@@ -1264,7 +1264,7 @@ export default function RootLayout() {
                 <Stack.Screen name="index" />
                 <Stack.Screen name="(auth)" />
                 <Stack.Screen name="(app)" />
-                <Stack.Screen name="join/[token]" options={{ animation: 'slide_from_bottom', gestureEnabled: true, fullScreenGestureEnabled: true }} />
+                <Stack.Screen name="join/[token]" options={{ animation: 'slide_from_bottom', gestureEnabled: true, fullScreenGestureEnabled: false, customAnimationOnGesture: false }} />
               </Stack>
               {!ready ? <FullSkeleton /> : null}
               <ModuleAutoBanner />

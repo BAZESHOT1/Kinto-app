@@ -110,6 +110,7 @@ export function MediaAlbum({
   avatar,
   nodeOnline,
   moduleOnline,
+  post = false,
 }: {
   messages: ViewMessage[];
   mine: boolean;
@@ -123,6 +124,8 @@ export function MediaAlbum({
   avatar?: { objectId: string; key: string; mime: string } | null;
   nodeOnline?: boolean;
   moduleOnline?: boolean;
+  /** Канал: пост по центру экрана, скругление со всех сторон. */
+  post?: boolean;
 }) {
   const theme = useTheme();
   const { width: screenW } = useWindowDimensions();
@@ -167,7 +170,7 @@ export function MediaAlbum({
       from={reduced ? { opacity: 1 } : { opacity: 0, translateY: mine ? 18 : 8 }}
       animate={{ opacity: 1, translateY: 0 }}
       transition={reduced ? { type: 'timing', duration: 0 } : { type: 'spring', damping: 24, stiffness: 260 }}
-      style={[styles.row, mine ? styles.rowMine : null]}
+      style={[styles.row, mine && !post ? styles.rowMine : null, post && { justifyContent: 'center' as const }]}
     >
       {!mine ? (
         <View style={styles.albumAvatar}>
@@ -180,7 +183,13 @@ export function MediaAlbum({
           />
         </View>
       ) : null}
-      <View style={[styles.content, { maxWidth: mine ? '86%' : '76%' }, mine ? { alignItems: 'flex-end' } : { alignItems: 'flex-start' }]}>
+      <View
+        style={[
+          styles.content,
+          { maxWidth: post ? '100%' : mine ? '86%' : '76%' },
+          post ? { alignItems: 'center' as const } : mine ? { alignItems: 'flex-end' as const } : { alignItems: 'flex-start' as const },
+        ]}
+      >
         {!mine && (asChannel || sender) ? (
           <View style={styles.whoRow}>
             {asChannel ? <Ionicons name="megaphone" size={12} color={theme.accent} /> : null}

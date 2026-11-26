@@ -30,6 +30,7 @@ function webEngine(): Engine {
   let stream: MediaStream | null = null;
   let chunks: Blob[] = [];
   let mime = '';
+  let startedAt = 0;
   return {
     async start() {
       stream = await navigator.mediaDevices.getUserMedia({ audio: true });
@@ -47,6 +48,7 @@ function webEngine(): Engine {
         if (e.data && e.data.size > 0) chunks.push(e.data);
       };
       recorder.start(250);
+      startedAt = Date.now();
     },
     stop(cancel) {
       return new Promise((resolve) => {
@@ -61,7 +63,12 @@ function webEngine(): Engine {
           if (!blob.size) return resolve(null);
           const bytes = new Uint8Array(await blob.arrayBuffer());
           const ext = type.includes('ogg') ? 'ogg' : type.includes('mp4') ? 'm4a' : 'webm';
-          resolve({ name: `voice-${Date.now()}.${ext}`, mime: type.split(';')[0] || 'audio/webm', bytes });
+          resolve({
+            name: `voice-${Date.now()}.${ext}`,
+            mime: type.split(';')[0] || 'audio/webm',
+            bytes,
+            duration: startedAt ? Math.max(1, Math.round((Date.now() - startedAt) / 1000)) : undefined,
+          });
         };
         if (!rec || rec.state === 'inactive') return void done();
         rec.onstop = () => void done();
@@ -91,6 +98,16 @@ function nativeEngine(): Engine {
       const rec = recording;
       recording = null;
       if (!rec) return null;
+      // Длительность надо взять ДО stopAndUnloadAsync().
+      let duration: number | undefined;
+      try {
+        const status = await rec.getStatusAsync();
+        if (status.isRecording && status.durationMillis > 0) {
+          duration = Math.max(1, Math.round(status.durationMillis / 1000));
+        }
+      } catch {
+        duration = undefined;
+      }
       try {
         await rec.stopAndUnloadAsync();
       } catch {
@@ -104,7 +121,7 @@ function nativeEngine(): Engine {
       const { fromB64 } = await import('../../crypto/core');
       const bytes = fromB64(b64);
       if (!bytes.length) return null;
-      return { name: `voice-${Date.now()}.m4a`, mime: 'audio/mp4', bytes };
+      return { name: `voice-${Date.now()}.m4a`, mime: 'audio/mp4', bytes, duration };
     },
   };
 }

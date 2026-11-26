@@ -11,7 +11,6 @@ import Reanimated, { FadeOut, useAnimatedStyle, useSharedValue, withSpring } fro
 import { Ionicons } from '@expo/vector-icons';
 import { router, usePathname } from 'expo-router';
 import { MotiView } from 'moti';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTheme } from '../theme/useTheme';
 import { useHaptics } from './useHaptics';
 import { useReducedMotion } from './useReducedMotion';
@@ -31,7 +30,6 @@ const DOCK_WIDTH_COMPACT = 176;
 
 export function PhoneDock() {
   const theme = useTheme();
-  const insets = useSafeAreaInsets();
   const { width: screenWidth } = useWindowDimensions();
   const narrow = screenWidth < 360;
   const compact = screenWidth < 390;
@@ -116,7 +114,7 @@ export function PhoneDock() {
 
   const navigateTo = (href: string) => {
     if (href === '/chats') {
-      router.navigate({ pathname: '/chats', params: { __nav: activeId === 'settings' ? 'left' : 'right' } } as never);
+      router.navigate('/chats' as never);
       return;
     }
     if (typeof router.navigate === 'function') router.navigate(href as never);
@@ -126,7 +124,8 @@ export function PhoneDock() {
   const tileWidth = dockWidth > 0 ? (dockWidth - DOCK_PADDING * 2 - TILE_GAP * (tiles.length - 1)) / tiles.length : 0;
   const onDockLayout = (e: LayoutChangeEvent) => setDockWidth(e.nativeEvent.layout.width);
   const enterTranslateY = enter.interpolate({ inputRange: [0, 1], outputRange: [16, 0] });
-  const dockBottom = Math.max(12, insets.bottom > 0 ? insets.bottom + 4 : 12);
+  // Отступ дока от нижнего края — 4 px (раньше был 12 + safe-area).
+  const dockBottom = 4;
 
   const userMatch = /^\/user\/([^/]+)(?:\/edit)?/.exec(pathname);
   const viewingOtherProfile =
@@ -352,7 +351,7 @@ const styles = StyleSheet.create({
     position: 'absolute',
     left: 10,
     right: 10,
-    bottom: 12,
+    bottom: 4,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',

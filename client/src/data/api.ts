@@ -47,7 +47,7 @@ function nextApiBase(): string | null {
 }
 
 /** Ошибки прокси/шлюза перед Hub: сервер перезапускается или не ответил вовремя. */
-const GATEWAY_ERRORS = new Set([502, 503, 504, 520, 521, 522, 523, 524, 525, 526, 530]);
+const GATEWAY_ERRORS = new Set([500, 502, 503, 504, 520, 521, 522, 523, 524, 525, 526, 530]);
 
 export class ApiError extends Error {
   constructor(
@@ -295,7 +295,7 @@ async function req<T>(path: string, init: RequestInit = {}): Promise<T> {
   // Cloudflare не достучался до сервера (521/522/523/530 и т.п.): пробуем запасной домен. Для записи
   // (POST и др.) — только когда запрос заведомо не дошёл до Hub.
   const reqMethod = String((init as { method?: string } | undefined)?.method ?? 'GET').toUpperCase();
-  const unreachable = reqMethod === 'GET' ? [502, 503, 504, 521, 522, 523, 524, 525, 526, 530] : [521, 522, 523, 530];
+  const unreachable = reqMethod === 'GET' ? [500, 502, 503, 504, 521, 522, 523, 524, 525, 526, 530] : [521, 522, 523, 530];
   if (unreachable.includes(res.status)) {
     const next = nextApiBase();
     if (next) {

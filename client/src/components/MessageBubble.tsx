@@ -189,6 +189,7 @@ export function MessageBubble({
   asChannelTitle,
   secret,
   viewsCount,
+  post = false,
 }: {
   item: ViewMessage;
   group?: BubbleGroup;
@@ -237,6 +238,8 @@ export function MessageBubble({
   secret?: boolean;
   /** Просмотры поста канала. */
   viewsCount?: number;
+  /** Канал: сообщение — пост по центру экрана со скруглением со всех сторон. */
+  post?: boolean;
 }) {
   const theme = useTheme();
   const reduced = useReducedMotion();
@@ -356,19 +359,26 @@ export function MessageBubble({
   const R = 18;
   const r = 7;
 
-  const radii = item.mine
+  const radii = post
     ? {
         borderTopLeftRadius: R,
-        borderBottomLeftRadius: R,
-        borderTopRightRadius: first ? R : r,
-        borderBottomRightRadius: last ? R : r,
-      }
-    : {
         borderTopRightRadius: R,
+        borderBottomLeftRadius: R,
         borderBottomRightRadius: R,
-        borderTopLeftRadius: first ? R : r,
-        borderBottomLeftRadius: last ? R : r,
-      };
+      }
+    : item.mine
+      ? {
+          borderTopLeftRadius: R,
+          borderBottomLeftRadius: R,
+          borderTopRightRadius: first ? R : r,
+          borderBottomRightRadius: last ? R : r,
+        }
+      : {
+          borderTopRightRadius: R,
+          borderBottomRightRadius: R,
+          borderTopLeftRadius: first ? R : r,
+          borderBottomLeftRadius: last ? R : r,
+        };
 
   const reactions = ext.reactions ?? [];
   const senderColor = asChannel ? theme.accent : roleColor(theme, role);
@@ -386,7 +396,12 @@ export function MessageBubble({
       from={reduced || !fresh ? { opacity: 1 } : { opacity: 0, translateY: item.mine ? 26 : 10, scale: item.mine ? 0.94 : 0.98 }}
       animate={{ opacity: 1, translateY: 0, scale: 1 }}
       transition={reduced ? { type: 'timing', duration: 0 } : motion.spring}
-      style={[styles.row, item.mine && styles.rowMine, { marginTop: first ? 8 : 2 }]}
+      style={[
+        styles.row,
+        item.mine && !post && styles.rowMine,
+        post && { justifyContent: 'center' as const },
+        { marginTop: first ? 8 : 2 },
+      ]}
     >
       {showAvatar ? (
         first ? (
@@ -417,7 +432,7 @@ export function MessageBubble({
       ) : null}
       <Animated.View
         style={{
-          maxWidth: showAvatar ? '78%' : '86%',
+          maxWidth: post ? '100%' : showAvatar ? '78%' : '86%',
           transform: [{ scale: pressScale }],
         }}
       >
@@ -491,13 +506,36 @@ export function MessageBubble({
           ) : null}
 
           {item.kind === 'media' ? (
-            <MediaMessage
-              item={item}
-              previewUri={previewUri}
-              uploading={uploading}
-              progressPct={progressPct}
-              stageLabel={uploadStage ? STAGE_LABEL[uploadStage] : null}
-            />
+            <View>
+              {item.text ? richText(
+                item.text,
+                highlight,
+                item.mine ? onMine : theme.textPrimary,
+                item.mine ? onMine : theme.accent,
+                item.mine ? 'rgba(255,255,255,0.3)' : theme.accentSoft,
+                item.mine,
+              ) : null}
+              {item.files && item.files.length > 1
+                ? item.files.map((f, idx) => (
+                    <MediaMessage
+                      key={f.id || idx}
+                      item={{ ...item, file: f }}
+                      previewUri={idx === 0 ? previewUri : undefined}
+                      uploading={uploading}
+                      progressPct={progressPct}
+                      stageLabel={uploadStage ? STAGE_LABEL[uploadStage] : null}
+                    />
+                  ))
+                : (
+                    <MediaMessage
+                      item={item}
+                      previewUri={previewUri}
+                      uploading={uploading}
+                      progressPct={progressPct}
+                      stageLabel={uploadStage ? STAGE_LABEL[uploadStage] : null}
+                    />
+                  )}
+            </View>
           ) : item.text ? (
             richText(
               item.text,

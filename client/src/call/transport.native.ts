@@ -1,5 +1,5 @@
 import { createCallOffer, type RtcFacade } from './shared';
-import type { CallChannel, CallJoiner, CallOfferResult } from './transport';
+import type { CallChannel, CallJoiner, CallOfferResult } from './constants';
 
 // Expo/RN: импорт resolve-ится через autolinking react-native-webrtc.
 // Динамический импорт защищает веб-бандл от нативной библиотеки.
