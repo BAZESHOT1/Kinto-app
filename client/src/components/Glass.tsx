@@ -16,11 +16,11 @@ import { useTheme } from '../theme/useTheme';
 
 export const GLASS_BORDER = 'rgba(255, 255, 255, 0.10)';
 /** Заливка кнопок шапки: 12% белого. */
-export const GLASS_FILL_BUTTON = 'rgba(255, 255, 255, 0.12)';
-/** Заливка навбара: 8% белого поверх размытия. */
-export const GLASS_FILL_DOCK = 'rgba(255, 255, 255, 0.08)';
-/** Фон закреплённых чатов: 7% белого. */
-export const PINNED_SURFACE = 'rgba(255, 255, 255, 0.07)';
+export const GLASS_FILL_BUTTON = 'rgba(255, 255, 255, 0.08)';
+/** Заливка навбара: 6% белого поверх размытия. */
+export const GLASS_FILL_DOCK = 'rgba(255, 255, 255, 0.06)';
+/** Фон закреплённых чатов: 6% белого. */
+export const PINNED_SURFACE = 'rgba(255, 255, 255, 0.06)';
 
 type GlassProps = ViewProps & {
   /** Заливка поверх размытия (процент белого). */
@@ -46,7 +46,7 @@ export function Glass({
   radius = 20,
   borderColor = GLASS_BORDER,
   borderWidth = 1,
-  intensity = 48,
+  intensity = 72,
   tint,
   transparent = false,
   ...rest
@@ -73,10 +73,10 @@ export function Glass({
   const lightFill = (value: string) => {
     const m = /^rgba\(255,\s*255,\s*255,\s*([0-9.]+)\)$/.exec(value.replace(/\s+/g, ' ').trim());
     if (!m) return value;
-    return `rgba(255,255,255,${Math.min(0.78, 0.5 + Number(m[1]) * 2)})`;
+    return `rgba(255,255,255,${Math.min(0.92, 0.6 + Number(m[1]) * 2)})`;
   };
   const effFill = light ? lightFill(fill) : fill;
-  const effBorder = light && borderColor === GLASS_BORDER ? 'rgba(0,0,0,0.08)' : borderColor;
+  const effBorder = light && borderColor === GLASS_BORDER ? 'rgba(16,24,40,0.06)' : borderColor;
   const effTint = tint ?? (light ? 'light' : 'dark');
   // Монотонный стиль: без размытия и полупрозрачности — сплошная серая / тёмно-белая заливка.
   if (theme.glassUi === false) {
@@ -85,7 +85,7 @@ export function Glass({
         {...rest}
         style={[
           styles.base,
-          { borderRadius: radius, borderWidth, borderColor: effBorder, backgroundColor: light ? '#E9EAEE' : '#1F1F22' },
+          { borderRadius: radius, borderWidth, borderColor: effBorder, backgroundColor: light ? '#F2F3F7' : '#141416' },
           style,
         ]}
       >
@@ -104,10 +104,10 @@ export function Glass({
           borderWidth,
           borderColor: effBorder,
           // На web лёгкая тёмная подложка нужна, чтобы стекло читалось на чёрном.
-          backgroundColor: web ? (light ? 'rgba(255, 255, 255, 0.45)' : 'rgba(22, 22, 24, 0.34)') : 'transparent',
+          backgroundColor: web ? (light ? 'rgba(255, 255, 255, 0.65)' : 'rgba(10, 10, 12, 0.50)') : 'transparent',
           ...(web
             ? ({
-                backdropFilter: 'blur(20px) saturate(1.5)',
+                backdropFilter: 'blur(32px) saturate(1.6)',
                 WebkitBackdropFilter: 'blur(20px) saturate(1.5)',
               } as object)
             : null),

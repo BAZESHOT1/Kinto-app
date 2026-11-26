@@ -4,6 +4,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   ActivityIndicator,
   Alert,
+  Image,
   Animated,
   Keyboard,
   Modal,
@@ -27,6 +28,7 @@ import { Wallpaper } from '../../../src/components/Wallpaper';
 import { Glass, GLASS_FILL_BUTTON } from '../../../src/components/Glass';
 import { useTheme } from '../../../src/theme/useTheme';
 import { copyText } from '../../../src/utils/clipboard';
+import { bytesToDataUri } from '../../../src/components/chat/MediaMessage';
 import { useIsWide } from '../../../src/theme/useIsWide';
 import { MessageBubble, SystemMessage, type BubbleGroup, type QuotedMessage } from '../../../src/components/MessageBubble';
 import type { PickedFile } from '../../../src/components/file';
@@ -215,6 +217,8 @@ function ChatScreen({ forcedId }: { forcedId?: string } = {}) {
   const [dropBusy, setDropBusy] = useState(false);
   const [asChannel, setAsChannel] = useState(false);
   const [attachOpen, setAttachOpen] = useState(false);
+  /** Вложения прикрепляются к черновику и уходят одним сообщением при Send. */
+  const [pendingFiles, setPendingFiles] = useState<PickedFile[]>([]);
   /** Локально учтённые просмотры (после markMessageView). */
   const [viewCounts, setViewCounts] = useState<Record<string, number>>({});
   /** Оверлей приватности секретного чата. */
@@ -498,6 +502,7 @@ function ChatScreen({ forcedId }: { forcedId?: string } = {}) {
     viewMarkedRef.current.clear();
     setViewCounts({});
     setAsChannel(false);
+    setPendingFiles([]);
     setSecretShield(false);
     // Лента из кэша для нового чата: память + постоянное хранилище.
     setCachedMessages((getCachedMessages(chatId) as ViewMessage[] | null) ?? []);
@@ -1185,7 +1190,7 @@ function ChatScreen({ forcedId }: { forcedId?: string } = {}) {
     const body = text.trim();
     // Текст не блокируем на время чужой медиа-загрузки: оптимистичное
     // сообщение уходит в кэш сразу, а транспорт решает HTTP/mesh.
-    if (!body) return;
+    if (!body && pendingFiles.length === 0) return;
     if (!canCompose) {
       setError(
         !chat
@@ -1237,15 +1242,32 @@ function ChatScreen({ forcedId }: { forcedId?: string } = {}) {
       /* звук не критичен */
     }
     setError('');
-    sendMutation.mutate(
-      { body, clientId, myUsername, replyId, asChannel: postAsChannel, scheme: isE2e ? 'e2e' : 'server' },
-      {
-        onError: () => {
-          haptics.error();
-          sounds.error();
-        },
-      },
-    );
+    const attached = pendingFiles;
+    setPendingFiles([]);
+    const proceed = () => {
+      if (attached.length) {
+        // Одно сообщение: текст + до 10 вложений (данный слой уже умеет это).
+        startMediaUpload(attached, replyId, body);
+      } else {
+        sendMutation.mutate(
+          { body, clientId, myUsername, replyId, asChannel: postAsChannel, scheme: isE2e ? 'e2e' : 'server' },
+          {
+            onError: () => {
+              haptics.error();
+              sounds.error();
+            },
+          },
+        );
+      }
+    };
+    if (attached.length && channel !== 'internet') {
+      Alert.alert('Медиа только через интернет', 'Сообщение с вложениями будет отправлено, когда появится интернет. Продолжить?', [
+        { text: 'Отмена', style: 'cancel' },
+        { text: 'Продолжить', onPress: proceed },
+      ]);
+      return;
+    }
+    proceed();
   }
 
   /* --- медиа: превью → сжатие → шифрование → загрузка с прогрессом --- */
@@ -1388,18 +1410,10 @@ function ChatScreen({ forcedId }: { forcedId?: string } = {}) {
     }
     const files = (Array.isArray(picked) ? picked : [picked]).slice(0, 10);
     if (!files.length) return;
-    const proceed = () => {
-      startMediaUpload(files, replyTo?.id, String(text ?? '').trim());
-      setText('');
-    };
-    if (channel !== 'internet') {
-      Alert.alert('Медиа только через интернет', 'Медиа будет отправлено, когда появится интернет. Продолжить?', [
-        { text: 'Отмена', style: 'cancel' },
-        { text: 'Продолжить', onPress: proceed },
-      ]);
-      return;
-    }
-    proceed();
+    // Только кладём в черновик: отправка happens по кнопке Send вместе с текстом.
+    setPendingFiles((prev) => [...prev, ...files].slice(0, 10));
+    setError('');
+    setTimeout(() => inputRef.current?.focus(), 60);
   }
 
   /* -------------------------------------------- drag&drop файлов (только web) */
@@ -1906,6 +1920,11 @@ function ChatScreen({ forcedId }: { forcedId?: string } = {}) {
           // Чат компенсирует его сам (раньше оболочка обнуляла отступ только
           // для чата), чтобы шапка не опускалась двойным отступом.
           marginTop: -((insets.top || 12) + 12),
+          // Компенсируем боковые/нижние отступы AppShell — иначе по краям
+          // остаются чёрные/белые полосы, а обои не закрывают весь экран.
+          marginLeft: wide ? -24 : -16,
+          marginRight: wide ? -28 : -16,
+          marginBottom: wide ? -32 : 0,
           // Акцентная рамка вокруг экрана секретного чата.
           borderWidth: secret ? 1.5 : 0,
           borderColor: 'transparent',
@@ -2149,11 +2168,46 @@ function ChatScreen({ forcedId }: { forcedId?: string } = {}) {
           </MotiView>
         ) : null}
 
+        {pendingFiles.length ? (
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 14, paddingBottom: 6 }}>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ flexDirection: 'row', gap: 8, alignItems: 'center' }}>
+              {pendingFiles.map((f, idx) => (
+                <View key={`${f.name}-${idx}`} style={{ alignItems: 'center', gap: 3 }}>
+                  {f.mime.startsWith('image/') ? (
+                    <Image
+                      source={{ uri: bytesToDataUri(f.bytes, f.mime) ?? '' }}
+                      style={{ width: 54, height: 54, borderRadius: 10 }}
+                    />
+                  ) : (
+                    <View style={{ width: 54, height: 54, borderRadius: 10, alignItems: 'center', justifyContent: 'center', backgroundColor: theme.surfaceElevated }}>
+                      <Ionicons name="document-outline" size={22} color={theme.textSecondary} />
+                    </View>
+                  )}
+                  <Pressable
+                    hitSlop={6}
+                    onPress={() => setPendingFiles((prev) => prev.filter((_, j) => j !== idx))}
+                    accessibilityRole="button"
+                    accessibilityLabel="Убрать вложение"
+                  >
+                    <Ionicons name="close-circle" size={16} color={theme.danger} />
+                  </Pressable>
+                </View>
+              ))}
+            </ScrollView>
+            <Text style={{ color: theme.textDisabled, fontSize: 11 }}>{pendingFiles.length}/10</Text>
+          </View>
+        ) : null}
+
         <View
           style={[
             styles.composer,
             {
-              borderTopColor: 'transparent',
+              borderTopColor: theme.glassBorder,
+              // Полупрозрачный слой поверх истории: сообщения читаются под ним.
+              backgroundColor: theme.dark ? 'rgba(10,10,12,0.72)' : 'rgba(255,255,255,0.88)',
+              ...(Platform.OS === 'web'
+                ? ({ backdropFilter: 'blur(28px) saturate(1.5)', WebkitBackdropFilter: 'blur(28px) saturate(1.5)' } as object)
+                : null),
               opacity: canCompose ? 1 : 0.65,
               // Safe-area снизу только при закрытой клавиатуре: иначе KAV уже
               // поднял композер, и лишний отступ даёт «пузырь» над клавиатурой.
@@ -2169,7 +2223,7 @@ function ChatScreen({ forcedId }: { forcedId?: string } = {}) {
             hitSlop={6}
             style={({ pressed }) => ({ opacity: pressed ? 0.65 : 1 })}
           >
-            <Glass transparent radius={26} fill={GLASS_FILL_BUTTON} style={styles.attach}>
+            <Glass radius={26} fill={GLASS_FILL_BUTTON} intensity={72} style={styles.attach}>
               <MotiView
                 animate={{ rotate: attachOpen ? '45deg' : '0deg' }}
                 transition={reduced ? { type: 'timing', duration: 0 } : motion.softSpring}
@@ -2220,27 +2274,27 @@ function ChatScreen({ forcedId }: { forcedId?: string } = {}) {
               },
             ]}
           />
-          {!text.trim() && !editing ? (
+          {!text.trim() && !editing && pendingFiles.length === 0 ? (
             <VoiceRecorder
               onSend={(file) => onAttach(file)}
               onError={(message) => pushToast({ kind: 'error', message })}
               disabled={!canCompose}
             />
           ) : null}
-          {text.trim() || editing ? (
+          {text.trim() || editing || pendingFiles.length ? (
           <Animated.View style={{ transform: [{ scale: sendScale }] }}>
             <Pressable
               onPress={() => void onSend()}
               onPressIn={() => pressSend(true)}
               onPressOut={() => pressSend(false)}
-              disabled={!text.trim() || (sending && Boolean(editing))}
+              disabled={(!text.trim() && pendingFiles.length === 0) || (sending && Boolean(editing))}
               accessibilityRole="button"
               accessibilityLabel={editing ? 'Сохранить изменения' : 'Отправить'}
               style={({ pressed }) => [
                 styles.send,
                 {
                   backgroundColor: theme.accent,
-                  opacity: !canCompose || !text.trim() || (sending && Boolean(editing)) ? 0.45 : pressed ? 0.85 : 1,
+                  opacity: !canCompose || (!text.trim() && pendingFiles.length === 0) || (sending && Boolean(editing)) ? 0.45 : pressed ? 0.85 : 1,
                 },
               ]}
             >

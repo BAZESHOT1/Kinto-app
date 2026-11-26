@@ -39,7 +39,7 @@ export function useEncryptedImage(info?: AvatarInfo | null): string | null {
 export function Wallpaper({
   image,
   previewUri,
-  dim = 0.38,
+  dim = 0.55,
   pattern = false,
   bleed = false,
 }: {

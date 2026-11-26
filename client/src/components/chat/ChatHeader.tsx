@@ -195,7 +195,7 @@ export function ChatHeader({
     >
       <View style={[styles.row, wide && { gap: 8 }]}>
         <PressableScale pressedScale={0.9} onPress={onBack} accessibilityRole="button" accessibilityLabel="Назад" hitSlop={6}>
-          <Glass transparent radius={wide ? 23 : 28} fill={GLASS_FILL_BUTTON} style={[styles.round, wide && { width: 46, height: 46 }]}>
+          <Glass radius={wide ? 23 : 28} fill={GLASS_FILL_BUTTON} intensity={72} style={[styles.round, wide && { width: 46, height: 46 }]}>
             <Ionicons name="chevron-back" size={wide ? 22 : 26} color={theme.textPrimary} />
           </Glass>
         </PressableScale>
@@ -210,7 +210,7 @@ export function ChatHeader({
           containerStyle={{ flex: 1, minWidth: 0 }}
           style={{ flex: 1 }}
         >
-          <Glass transparent radius={wide ? 24 : 29} fill={GLASS_FILL_BUTTON} style={[styles.pill, wide && { height: 50 }]}>
+          <Glass radius={wide ? 24 : 29} fill={GLASS_FILL_BUTTON} intensity={72} style={[styles.pill, wide && { height: 50 }]}>
             <View style={{ flexDirection: 'row', alignItems: 'center', maxWidth: '100%' }}>
               {statusPhase === 'connecting' || statusPhase === 'updating' ? (
                 <MotiView

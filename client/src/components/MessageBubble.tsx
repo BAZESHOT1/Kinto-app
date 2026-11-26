@@ -360,8 +360,8 @@ export function MessageBubble({
   // Тёмная тема: полупрозрачные «стеклянные» пузыри поверх фона чата (как на макете).
   const bubbleColor = theme.dark && theme.glassUi !== false
     ? item.mine
-      ? 'rgba(255,255,255,0.17)'
-      : 'rgba(24,24,26,0.84)'
+      ? 'rgba(255,255,255,0.12)'
+      : 'rgba(10,10,12,0.90)'
     : item.mine
       ? theme.bubbleMine
       : theme.bubbleOther;
@@ -474,6 +474,9 @@ export function MessageBubble({
               backgroundColor: pressed ? theme.surfacePressed : bubbleColor,
               borderColor: highlightActive ? theme.accent : theme.dark ? 'rgba(255,255,255,0.07)' : item.mine ? 'transparent' : theme.line,
               borderWidth: highlightActive ? 1.5 : 1,
+              ...(Platform.OS === 'web'
+                ? ({ backdropFilter: 'blur(24px) saturate(1.4)', WebkitBackdropFilter: 'blur(24px) saturate(1.4)' } as object)
+                : null),
             },
             first && styles.bubbleFirst,
             item.kind === 'media' && styles.bubbleMedia,
