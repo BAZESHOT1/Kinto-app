@@ -242,6 +242,8 @@ function ChatScreen({ forcedId }: { forcedId?: string } = {}) {
    * (первое открытие, отправка, новое входящее), а не на каждый layout.
    */
   const pendingScrollRef = useRef(false);
+  /** Позиция при открытии выставляется один раз — иначе лента дёргается. */
+  const initialScrollDoneRef = useRef(false);
   const lastReadReceiptRef = useRef('');
   const initialWindowRef = useRef(0);
   const userScrolledRef = useRef(false);
@@ -973,7 +975,8 @@ function ChatScreen({ forcedId }: { forcedId?: string } = {}) {
   }, []);
 
   const initialScrollToRead = useCallback(() => {
-    if (userScrolledRef.current || Date.now() > initialWindowRef.current) return;
+    if (userScrolledRef.current || initialScrollDoneRef.current || Date.now() > initialWindowRef.current) return;
+    initialScrollDoneRef.current = true;
     const unread = Math.max(0, Math.min(Number(chat?.unread ?? 0), allMessages.length));
     if (unread > 0) {
       const index = Math.max(0, allMessages.length - unread - 1);
@@ -1002,24 +1005,22 @@ function ChatScreen({ forcedId }: { forcedId?: string } = {}) {
       const target = cachedReadIndex >= 0
         ? Math.min(allMessages.length - 1, cachedReadIndex + 1)
         : Math.max(0, firstUnread - 1);
-      const timers = [250, 650, 1100].map((delay) =>
-        setTimeout(() => {
-          if (userScrolledRef.current) return;
-          listRef.current?.scrollToIndex({ index: target, animated: false, viewPosition: 0.85 });
-        }, delay),
-      );
-      return () => timers.forEach(clearTimeout);
+      // Один проход: повторные таймеры вместе с onContentSizeChange давали
+      // несколько скачков ленты во время анимации перехода.
+      const timer = setTimeout(() => {
+        if (userScrolledRef.current) return;
+        listRef.current?.scrollToIndex({ index: target, animated: false, viewPosition: 0.85 });
+      }, 250);
+      return () => clearTimeout(timer);
     }
 
     pendingScrollRef.current = true;
-    const timers = [200, 600, 1100].map((delay) =>
-      setTimeout(() => {
-        if (userScrolledRef.current) return;
-        pendingScrollRef.current = false;
-        scrollToEnd(false);
-      }, delay),
-    );
-    return () => timers.forEach(clearTimeout);
+    const timer = setTimeout(() => {
+      if (userScrolledRef.current) return;
+      pendingScrollRef.current = false;
+      scrollToEnd(false);
+    }, 200);
+    return () => clearTimeout(timer);
   }, [chat, allMessages.length, scrollToEnd]);
 
   // Когда с сервера пришла полная лента, ещё раз встаём на последнее

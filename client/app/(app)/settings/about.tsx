@@ -52,7 +52,7 @@ export default function AboutScreen() {
     <SettingsPage title="О приложении" subtitle="Версия, правовая информация и журнал">
       <SettingsSection title="Kinto" delay={0}>
         <GlassCard>
-          <SettingsRow icon="layers-outline" title="Версия" subtitle="Beta-сборка" right={<Text style={[styles.mono, { color: theme.textSecondary }]}>{VERSION}</Text>} />
+          <SettingsRow icon="layers-outline" title="Версия" subtitle="Актуальная сборка" right={<Text style={[styles.mono, { color: theme.textSecondary }]}>{VERSION}</Text>} />
           <SettingsRow
             icon="document-text-outline"
             title="Лицензии"

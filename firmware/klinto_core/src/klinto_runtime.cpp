@@ -318,7 +318,6 @@ bool KlintoNode::begin() {
     Serial.println("[klinto3] LittleFS mount failed");
   }
   loadConfig();
-  kl_ctrl_signer_init(); /* kMesh v2: подпись управляющих пакетов */
   /* Фиксируем в NVS роль/распиновку/тип модуля из сборки: эти параметры
    * должны переживать перезагрузку и OTA. */
   kl_config_save_nvs(&cfg_);

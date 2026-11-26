@@ -65,7 +65,19 @@ export function takeHandoffSession(): unknown | null {
     const value = window.name;
     if (!value || !value.startsWith('klinto-session:')) return null;
     window.name = '';
-    return JSON.parse(value.slice('klinto-session:'.length));
+    // Login-CSRF: подменить window.name может любая страница, которая
+    // отправила сюда пользователя. Принимаем хендовер только с HTTP-версии
+    // того же хоста и только с правдоподобной формой сессии.
+    if (typeof document !== 'undefined' && document.referrer) {
+      let from: URL;
+      try { from = new URL(document.referrer); } catch { return null; }
+      if (from.protocol !== 'http:' || from.hostname !== window.location.hostname) return null;
+    }
+    const parsed = JSON.parse(value.slice('klinto-session:'.length)) as
+      | { accessToken?: unknown; refreshToken?: unknown }
+      | null;
+    if (!parsed || typeof parsed.accessToken !== 'string' || typeof parsed.refreshToken !== 'string') return null;
+    return parsed;
   } catch {
     return null;
   }

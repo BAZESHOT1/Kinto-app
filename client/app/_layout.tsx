@@ -1220,7 +1220,14 @@ export default function RootLayout() {
     const inAuth = segments.length === 0 || segments[0] === 'auth' || segments[0] === '(auth)';
     const isJoin = segments[0] === 'join';
     const hasSession = Boolean(sessionState) || getSession() !== null;
-    const nextPath = typeof params.next === 'string' && params.next.startsWith('/') ? params.next : '/chats';
+    // Открытый редирект: `//evil.com` тоже начинается с '/'. Пускаем только
+    // внутренние пути без двойного слеша/бэкслэша и без схемы.
+    const rawNext = typeof params.next === 'string' ? params.next : '';
+    const nextPath =
+      rawNext.startsWith('/') && !rawNext.startsWith('//') && !rawNext.includes('\\') &&
+      !rawNext.includes('://') && !rawNext.includes('%5c')
+        ? rawNext
+        : '/chats';
 
     // РћРґРёРЅ РїРµСЂРµС…РѕРґ Р·Р° СЂР°Р·: РїРѕРІС‚РѕСЂРЅС‹Р№ replace РІРѕ РІСЂРµРјСЏ Р°РЅРёРјР°С†РёРё РЅР°С‚РёРІРЅРѕРіРѕ
     // СЃС‚РµРєР° РјРѕРі РїСЂРёРІРµСЃС‚Рё Рє Р·Р°РІРёСЃР°РЅРёСЋ РёРЅС‚РµСЂС„РµР№СЃР° РїРѕСЃР»Рµ РІС…РѕРґР°/СЂРµРіРёСЃС‚СЂР°С†РёРё.

@@ -31,25 +31,21 @@ export default function AppLayout() {
           contentStyle: { backgroundColor: theme.background },
           animation: 'slide_from_right',
           animationDuration: 240,
-          // iOS: интерактивный свайп назад для всех страниц, включая настройки
-          // и профиль. Полноэкранный жест — свайп с любого места экрана.
+          // Обычный свайп от левого края. Полноэкранный жест и кастомная
+          // анимация жеста отключены: в react-native-screens они вызывают
+          // snap в 1-2 кадра при отпускании — экран «дёргается» при возврате.
           gestureEnabled: true,
-          fullScreenGestureEnabled: true,
-          customAnimationOnGesture: true,
+          fullScreenGestureEnabled: false,
+          customAnimationOnGesture: false,
           gestureDirection: 'horizontal',
         }}
       >
         <Stack.Screen
           name="chats"
-          options={({ route }) => ({
-            // Корневая вкладка: свайп назад не должен уводить на другой экран.
-            gestureEnabled: false,
-            fullScreenGestureEnabled: false,
-            // Из «Настроек» в «Чаты» на телефоне — анимация слева.
-            animation: (route.params as { __nav?: string } | undefined)?.__nav === 'left'
-              ? 'slide_from_left'
-              : 'slide_from_right',
-          })}
+          // Корневая вкладка: свайп назад не должен уводить на другой экран.
+          // Анимация фиксированная — смена опций по route.params во время
+          // перехода тоже давала рывок.
+          options={{ gestureEnabled: false, fullScreenGestureEnabled: false }}
         />
         <Stack.Screen name="settings" options={{ gestureEnabled: false, fullScreenGestureEnabled: false }} />
         <Stack.Screen name="settings/params" />

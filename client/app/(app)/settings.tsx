@@ -26,8 +26,6 @@ import { hasNetworkAccess } from '../../src/data/access';
 import { logout } from '../../src/data/auth';
 import { useStore } from '../../src/state/useStore';
 
-const VERSION = '1.0.0';
-
 /** Описание одной строки-раздела на главной странице настроек. */
 interface SectionRow {
   key: string;
@@ -302,17 +300,11 @@ export default function SettingsScreen() {
                   subtitle="Удерживайте 1 секунду для выхода"
                   onConfirmed={() => void doLogout()}
                 />
-                <Text style={{ color: theme.textSecondary, fontSize: 11.5, marginTop: 8, paddingHorizontal: 4 }}>
-                  Ключи шифрования останутся на этом устройстве. При следующем входе резерв ключей восстановится по паролю.
-                </Text>
               </SettingsSection>
             ) : null}
           </MotiView>
         )}
 
-        <Text style={{ color: theme.textDisabled, fontSize: 11.5, textAlign: 'center', marginTop: 6 }}>
-          Kinto {VERSION}
-        </Text>
       </View>
     </ScrollView>
   );
