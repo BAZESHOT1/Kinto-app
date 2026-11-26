@@ -15,7 +15,6 @@ import { Stack, useLocalSearchParams, usePathname, useRouter, useSegments } from
 import { MotiView } from 'moti';
 import { Ionicons } from '@expo/vector-icons';
 import { ThemeProvider, DefaultTheme, DarkTheme } from '@react-navigation/native';
-import { StatusBar } from 'expo-status-bar';
 import { AppState, Platform, View, ActivityIndicator, StyleSheet, Text } from 'react-native';
 import Head from 'expo-router/head';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
@@ -1250,7 +1249,6 @@ export default function RootLayout() {
     </Head>
     <KeyboardProvider>
     <View style={{ flex: 1, backgroundColor: theme.background }} suppressHydrationWarning>
-      <StatusBar style={theme.dark ? 'light' : 'dark'} />
       <QueryClientProvider client={queryClient} suppressHydrationWarning>
         <ThemeProvider value={navTheme}>
         {/* РњРѕРґСѓР»СЊ РІРѕСЃСЃС‚Р°РЅР°РІР»РёРІР°РµС‚СЃСЏ СЃР°Рј РїСЂРё Р·Р°РїСѓСЃРєРµ; РЅР° СЌРєСЂР°РЅРµ Р»РѕРіРёРЅР° РЅРµ СЃРєР°РЅРёСЂСѓРµС‚. */}

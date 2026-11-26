@@ -1,6 +1,5 @@
 import React from 'react';
 import { Animated, Platform, StyleSheet, Text, View, useWindowDimensions } from 'react-native';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Glass, GLASS_FILL_BUTTON } from '../Glass';
 import { Ionicons } from '@expo/vector-icons';
 import { MotiView } from 'moti';
@@ -131,7 +130,6 @@ export function ChatHeader({
 }) {
   const theme = useTheme();
   const reduced = useReducedMotion();
-  const insets = useSafeAreaInsets();
   const { width } = useWindowDimensions();
   const wide = width >= 900;
 
@@ -185,8 +183,8 @@ export function ChatHeader({
       style={[
         styles.header,
         {
-          // Safe-area сверху уже учитывает AppShell — здесь только небольшой зазор.
-          paddingTop: wide ? 14 : (Platform.OS === 'web' ? 12 : insets.top + 4),
+          // Safe-area принадлежит оболочке — здесь только вертикальный ритм.
+          paddingTop: wide ? 14 : 12,
           paddingHorizontal: wide ? 16 : 12,
           opacity: enter,
           transform: [{ translateY: enter.interpolate({ inputRange: [0, 1], outputRange: [-10, 0] }) }],

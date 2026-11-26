@@ -5,7 +5,8 @@ import { Ionicons } from '@expo/vector-icons';
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const LOGO = require('../../assets/logo.png');
 import { MotiView } from 'moti';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useLayoutInsets } from '../theme/useLayoutInsets';
+import { contentWidth, spacing } from '../theme/layout';
 import { useTheme } from '../theme/useTheme';
 import { useBodyBackground } from '../theme/useBodyBackground';
 import { useReducedMotion } from './useReducedMotion';
@@ -18,7 +19,7 @@ import { useReducedMotion } from './useReducedMotion';
 export function AuthShell({ children, maxWidth = 460 }: { children: React.ReactNode; maxWidth?: number }) {
   const theme = useTheme();
   const reduced = useReducedMotion();
-  const insets = useSafeAreaInsets();
+  const insets = useLayoutInsets();
   const { width } = useWindowDimensions();
   const compact = width < 480;
   useBodyBackground();
@@ -29,8 +30,8 @@ export function AuthShell({ children, maxWidth = 460 }: { children: React.ReactN
       contentContainerStyle={[
         styles.scroll,
         {
-          paddingTop: compact ? Math.max(insets.top, 8) + 24 : 64,
-          paddingBottom: Math.max(insets.bottom, 8) + 24,
+          paddingTop: compact ? insets.top + spacing.lg : 64,
+          paddingBottom: insets.bottom + spacing.lg,
           paddingHorizontal: compact ? 14 : 20,
         },
       ]}

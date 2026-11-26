@@ -6,7 +6,7 @@
  * только при необходимости и анимируются пружиной.
  */
 import React from 'react';
-import { Animated, Modal, Platform, Pressable, Text, View, StyleSheet, useWindowDimensions, type LayoutChangeEvent, type StyleProp, type ViewStyle } from 'react-native';
+import { Animated, Modal, Pressable, Text, View, StyleSheet, useWindowDimensions, type LayoutChangeEvent, type StyleProp, type ViewStyle } from 'react-native';
 import Reanimated, { FadeOut, useAnimatedStyle, useSharedValue, withSpring } from 'react-native-reanimated';
 import { Ionicons } from '@expo/vector-icons';
 import { router, usePathname } from 'expo-router';
@@ -22,9 +22,11 @@ import { PressableScale } from './chat/PressableScale';
 import { Avatar } from './Avatar';
 import { motion } from '../theme/motion';
 import { Glass, GLASS_FILL_DOCK } from './Glass';
+import { useLayoutInsets } from '../theme/useLayoutInsets';
+import { DOCK_BOTTOM_GAP, DOCK_HEIGHT, spacing } from '../theme/layout';
 
-const DOCK_PADDING = 5;
-const TILE_GAP = 4;
+const DOCK_PADDING = spacing.xxs + 1;
+const TILE_GAP = spacing.xxs;
 const DOCK_WIDTH = 200;
 const DOCK_WIDTH_COMPACT = 176;
 
@@ -120,8 +122,9 @@ export function PhoneDock() {
   const tileWidth = dockWidth > 0 ? (dockWidth - DOCK_PADDING * 2 - TILE_GAP * (tiles.length - 1)) / tiles.length : 0;
   const onDockLayout = (e: LayoutChangeEvent) => setDockWidth(e.nativeEvent.layout.width);
   const enterTranslateY = enter.interpolate({ inputRange: [0, 1], outputRange: [16, 0] });
-  // На нативе отступ 12 px, в вебе — 4 px (там safe-area рисует CSS).
-  const dockBottom = Platform.OS === 'web' ? 4 : 12;
+  // Единый источник: инсет снизу + зазор из layout-токенов.
+  const insets = useLayoutInsets();
+  const dockBottom = insets.bottom + DOCK_BOTTOM_GAP;
 
   const userMatch = /^\/user\/([^/]+)(?:\/edit)?/.exec(pathname);
   const viewingOtherProfile =
@@ -239,7 +242,7 @@ export function PhoneDock() {
 
       <Modal visible={chatsMenuOpen} transparent animationType="fade" onRequestClose={() => setChatsMenuOpen(false)}>
         <Pressable style={styles.menuBackdrop} onPress={() => setChatsMenuOpen(false)} accessibilityLabel="Закрыть меню чатов">
-          <View style={[styles.menuHost, { bottom: dockBottom + 72 }]}>
+          <View style={[styles.menuHost, { bottom: dockBottom + DOCK_HEIGHT + spacing.sm }]}>
             <MotiView
               from={{ opacity: 0, translateY: reduced ? 0 : 10, scale: reduced ? 1 : 0.96 }}
               animate={{ opacity: 1, translateY: 0, scale: 1 }}
@@ -313,8 +316,8 @@ const styles = StyleSheet.create({
   host: {
     position: 'absolute',
     left: 10,
-    right: 10,
-    bottom: 4,
+    right: spacing.sm,
+    bottom: DOCK_BOTTOM_GAP,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',

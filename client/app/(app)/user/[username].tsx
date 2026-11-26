@@ -4,7 +4,8 @@ import { Platform, Modal, Pressable, RefreshControl, ScrollView, StyleSheet, Tex
 import { Ionicons } from '@expo/vector-icons';
 import { MotiView } from 'moti';
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useShellMetrics } from '../../../src/components/AppShell';
+import { CONTENT_BOTTOM_PAD } from '../../../src/theme/layout';
 import { useTheme } from '../../../src/theme/useTheme';
 import { motion } from '../../../src/theme/motion';
 import { EmptyState } from '../../../src/components/EmptyState';
@@ -74,7 +75,7 @@ function profileUrl(username: string): string {
 /** Страница профиля: свой — профильные блоки, чужой — действия и приглашения. */
 export default function UserProfileScreen() {
   const theme = useTheme();
-  const shellInsets = useSafeAreaInsets();
+  const shell = useShellMetrics();
   const router = useRouter();
   const params = useLocalSearchParams<{ username: string }>();
   const username = String(params.username ?? '').trim();
@@ -357,10 +358,10 @@ export default function UserProfileScreen() {
       <ScrollView
         contentContainerStyle={{
           flexGrow: 1,
-          paddingBottom: 120,
+          paddingBottom: CONTENT_BOTTOM_PAD,
           // Компенсируем постоянный отступ AppShell: профиль сам задаёт
-          // safe-area через topPad, иначе отступ сверху удваивался.
-          marginTop: -((shellInsets.top || 12) + 12),
+          // Full-bleed: компенсируем ровно отступ оболочки.
+          marginTop: -shell.paddingTop,
         }}
         showsVerticalScrollIndicator={false}
         refreshControl={
@@ -1045,8 +1046,8 @@ function BrightProfile({
   const reduced = useReducedMotion();
   const { width } = useWindowDimensions();
   const desktop = width >= 900 && !forceMobile;
-  const insets = useSafeAreaInsets();
-  const topPad = desktop ? 0 : Platform.OS === 'web' ? 14 : insets.top + 6;
+  // Safe-area уже применена оболочкой — здесь только зазор контента.
+  const topPad = desktop ? 0 : 14;
   const badges = buildProfileBadges(badgeFacts, theme);
   const [badgesOpen, setBadgesOpen] = React.useState(false);
 

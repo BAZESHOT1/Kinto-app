@@ -8,6 +8,7 @@ import { MotiView } from 'moti';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useQueryClient } from '@tanstack/react-query';
 import { useTheme } from '../../../../src/theme/useTheme';
+import { CONTENT_BOTTOM_PAD } from '../../../../src/theme/layout';
 import { motion } from '../../../../src/theme/motion';
 import { EmptyState } from '../../../../src/components/EmptyState';
 import { ChatInfoSkeleton } from '../../../../src/components/skeletons/PageSkeletons';
@@ -493,7 +494,7 @@ function ChatInfoScreen({ forcedId }: { forcedId?: string } = {}) {
     const fallbackMembers = Number(params.members) || 0;
     const isClosed = fallbackVisibility === 'closed';
     return (
-      <ScrollView contentContainerStyle={{ padding: 12, paddingTop: 44, paddingBottom: 120 }} showsVerticalScrollIndicator={false}>
+      <ScrollView contentContainerStyle={{ padding: 12, paddingTop: 44, paddingBottom: CONTENT_BOTTOM_PAD }} showsVerticalScrollIndicator={false}>
         <View style={styles.center}>
           <PressableScale
             onPress={() => safeBack(router, '/chat/' + chatId)}
@@ -586,7 +587,7 @@ function ChatInfoScreen({ forcedId }: { forcedId?: string } = {}) {
 
   return (
     <>
-      <ScrollView contentContainerStyle={{ padding: 12, paddingBottom: 120 }} showsVerticalScrollIndicator={false}>
+      <ScrollView contentContainerStyle={{ padding: 12, paddingBottom: CONTENT_BOTTOM_PAD }} showsVerticalScrollIndicator={false}>
         <View style={styles.center}>
           <InfoHero
             title={title}

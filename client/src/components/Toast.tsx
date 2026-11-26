@@ -2,7 +2,7 @@ import React from 'react';
 import { Animated, PanResponder, Platform, Pressable, Text, View, StyleSheet } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { MotiView } from 'moti';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useLayoutInsets } from '../theme/useLayoutInsets';
 import { useStore, type Toast } from '../state/useStore';
 import { useTheme } from '../theme/useTheme';
 import { useReducedMotion } from './useReducedMotion';
@@ -243,7 +243,7 @@ function ToastCard({ toast, reduced }: CardProps) {
 export function ToastHost() {
   const toasts = useStore((s) => s.toasts);
   const reduced = useReducedMotion();
-  const insets = useSafeAreaInsets();
+  const insets = useLayoutInsets();
 
   return (
     <View

@@ -23,7 +23,9 @@ import { MotiView } from 'moti';
 import { FlashList } from '@shopify/flash-list';
 import { KeyboardAvoidingView as KCKeyboardAvoidingView } from 'react-native-keyboard-controller';
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useLayoutInsets } from '../../../src/theme/useLayoutInsets';
+import { useShellMetrics } from '../../../src/components/AppShell';
+import { contentWidth, listBottomReserve, spacing } from '../../../src/theme/layout';
 import { Wallpaper } from '../../../src/components/Wallpaper';
 import { Glass, GLASS_FILL_BUTTON } from '../../../src/components/Glass';
 import { useTheme } from '../../../src/theme/useTheme';
@@ -132,7 +134,8 @@ function ChatScreen({ forcedId }: { forcedId?: string } = {}) {
   const theme = useTheme();
   const wide = useIsWide();
   const reduced = useReducedMotion();
-  const insets = useSafeAreaInsets();
+  const insets = useLayoutInsets();
+  const shell = useShellMetrics();
   /* ВАЖНО: queryClient должен быть объявлен до useCallback(commitToCache),
    * иначе на веб-сборке возникает TDZ ReferenceError при открытии чата. */
   const qc = useQueryClient();
@@ -1887,12 +1890,9 @@ function ChatScreen({ forcedId }: { forcedId?: string } = {}) {
       style={{
         flex: 1,
         backgroundColor: 'transparent', // фон рисует AppShell/обои — шапка и ввод прозрачные
-        // iOS: явно уменьшаем высоту экрана на высоту клавиатуры.
-        // KAV padding в связке с react-native-screens иногда не срабатывает,
-        // поэтому используем проверенный явный отступ.
-        paddingBottom: Platform.OS === 'ios' ? keyboardHeight : 0,
       }}
-      behavior={undefined}
+      // Один контроллер клавиатуры: KAV. Ручного paddingBottom больше нет.
+      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
       keyboardVerticalOffset={0}
     >
       <View
@@ -1900,15 +1900,11 @@ function ChatScreen({ forcedId }: { forcedId?: string } = {}) {
         style={{
           flex: 1,
           backgroundColor: 'transparent',
-          // AppShell даёт постоянный safe-area отступ ради плавности переходов.
-          // Чат компенсирует его сам (раньше оболочка обнуляла отступ только
-          // для чата), чтобы шапка не опускалась двойным отступом.
-          marginTop: -((insets.top || 12) + 12),
-          // Компенсируем боковые/нижние отступы AppShell — иначе по краям
-          // остаются чёрные/белые полосы, а обои не закрывают весь экран.
-          marginLeft: wide ? -24 : -16,
-          marginRight: wide ? -28 : -16,
-          marginBottom: wide ? -32 : 0,
+          // Full-bleed: компенсируем ровно те значения, которые задала
+          // оболочка — без магических чисел и без привязки к pathname.
+          marginTop: -shell.paddingTop,
+          marginLeft: -shell.paddingLeft,
+          marginRight: -shell.paddingRight,
           // Акцентная рамка вокруг экрана секретного чата.
           borderWidth: secret ? 1.5 : 0,
           borderColor: 'transparent',
@@ -2037,7 +2033,7 @@ function ChatScreen({ forcedId }: { forcedId?: string } = {}) {
               contentContainerStyle={{
                 padding: wide ? 24 : 10,
                 paddingBottom: 26,
-                maxWidth: 900,
+                maxWidth: contentWidth.chat,
                 width: '100%',
                 alignSelf: 'center',
               }}
@@ -2253,7 +2249,7 @@ function ChatScreen({ forcedId }: { forcedId?: string } = {}) {
                 backgroundColor: 'transparent', // поле ввода прозрачное — фон чата просвечивает
                 color: theme.textPrimary,
                 borderColor: editing ? theme.accent : theme.dark ? 'rgba(255,255,255,0.10)' : 'rgba(0,0,0,0.08)',
-                maxWidth: 860,
+                maxWidth: contentWidth.chat,
                 height: inputHeight,
               },
             ]}
@@ -2417,7 +2413,7 @@ function ChatScreen({ forcedId }: { forcedId?: string } = {}) {
 const styles = StyleSheet.create({
   olderSpinner: { paddingVertical: 12, alignItems: 'center', justifyContent: 'center' },
   noChannelPill: { marginHorizontal: 12, marginBottom: 6, padding: 9, borderRadius: 10, flexDirection: 'row', gap: 8, alignItems: 'center' },
-  channelRow: { paddingHorizontal: 12, paddingBottom: 6, maxWidth: 940, width: '100%', alignSelf: 'center' },
+  channelRow: { paddingHorizontal: 12, paddingBottom: 6, maxWidth: contentWidth.chat, width: '100%', alignSelf: 'center' },
   channelChip: {
     alignSelf: 'flex-start',
     flexDirection: 'row',
@@ -2466,7 +2462,7 @@ const styles = StyleSheet.create({
     alignItems: 'flex-end',
     justifyContent: 'center',
     width: '100%',
-    maxWidth: 940,
+    maxWidth: contentWidth.chat,
     alignSelf: 'center',
   },
   input: { flex: 1, borderWidth: 1, borderRadius: 26, paddingHorizontal: 18, paddingVertical: 12, minHeight: 52, textAlignVertical: 'top', fontSize: 17 },

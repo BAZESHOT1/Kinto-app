@@ -24,13 +24,14 @@ export default function Root({ children }: PropsWithChildren) {
         <link rel="icon" type="image/svg+xml" href="/icon.svg?v=3" />
         <link rel="apple-touch-icon" href="/apple-touch-icon.png?v=3" />
         <link rel="icon" type="image/png" sizes="192x192" href="/icon-192.png?v=3" />
-    <style
-      id="bg-root"
-      dangerouslySetInnerHTML={{
-        __html: `html,body{margin:0;padding:0;background:#0A0E14;height:100%;-webkit-text-size-adjust:100%;text-size-adjust:100%;touch-action:manipulation;box-sizing:border-box}body{color:#E8F0FA;color-scheme:dark}#scaling-root{display:none}*,*::before,*::after{-webkit-tap-highlight-color:transparent}*{scrollbar-width:none}*::-webkit-scrollbar{width:0;height:0;display:none}@media (max-width:900px),(pointer:coarse){input,textarea,select{font-size:16px !important}html,body{touch-action:manipulation}}`,
-      }}
-    />
         <ScrollViewStyleReset />
+        {/* Наш стиль ПОСЛЕ сброса expo-router — иначе его height:100% перебивает dvh. */}
+        <style
+          id="bg-root"
+          dangerouslySetInnerHTML={{
+            __html: `html,body,#root{margin:0;height:100%;height:100dvh;box-sizing:border-box}html{background:#0A0E14}body{overflow:hidden;padding:env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);background:#0A0E14;color:#E8F0FA;color-scheme:dark;-webkit-text-size-adjust:100%;text-size-adjust:100%;touch-action:manipulation}#root{display:flex}#scaling-root{display:none}*,*::before,*::after{-webkit-tap-highlight-color:transparent}*{scrollbar-width:none}*::-webkit-scrollbar{width:0;height:0;display:none}@media (max-width:900px),(pointer:coarse){input,textarea,select{font-size:16px !important}}`,
+          }}
+        />
       </head>
       <body>{children}</body>
     </html>

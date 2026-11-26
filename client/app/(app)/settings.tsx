@@ -25,6 +25,7 @@ import { useMe, useModules, useNodes } from '../../src/data/queries';
 import { hasNetworkAccess } from '../../src/data/access';
 import { logout } from '../../src/data/auth';
 import { useStore } from '../../src/state/useStore';
+import { CONTENT_BOTTOM_PAD } from '../../src/theme/layout';
 
 /** Описание одной строки-раздела на главной странице настроек. */
 interface SectionRow {
@@ -150,7 +151,7 @@ export default function SettingsScreen() {
   }
 
   return (
-    <ScrollView contentContainerStyle={{ paddingBottom: 140 }} showsVerticalScrollIndicator={false}>
+    <ScrollView contentContainerStyle={{ paddingBottom: CONTENT_BOTTOM_PAD }} showsVerticalScrollIndicator={false}>
       <View style={styles.wrap}>
         <View style={styles.head}>
           <Text style={{ color: theme.textPrimary, fontSize: 26, fontWeight: '800' }}>Настройки</Text>

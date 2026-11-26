@@ -22,7 +22,7 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useLayoutInsets } from '../theme/useLayoutInsets';
 import { useTheme } from '../theme/useTheme';
 import { useStore, type InAppNotice } from '../state/useStore';
 import { sendMessage } from '../data/messaging';
@@ -166,7 +166,7 @@ function NoticeCard({
 
 export function InAppNotifications() {
   const theme = useTheme();
-  const insets = useSafeAreaInsets();
+  const insets = useLayoutInsets();
   const router = useRouter();
   const notices = useStore((s) => s.inApp);
   const dismiss = useStore((s) => s.dismissInApp);

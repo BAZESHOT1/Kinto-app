@@ -6,7 +6,7 @@ import React from 'react';
 import { ActivityIndicator, Pressable, Text, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { MotiView } from 'moti';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useLayoutInsets } from '../theme/useLayoutInsets';
 import { useTheme } from '../theme/useTheme';
 import { useReducedMotion } from './useReducedMotion';
 import { useModuleConnection } from '../modules/ModuleProvider';
@@ -14,7 +14,7 @@ import { useModuleConnection } from '../modules/ModuleProvider';
 export function ModuleAutoBanner() {
   const theme = useTheme();
   const reduced = useReducedMotion();
-  const insets = useSafeAreaInsets();
+  const insets = useLayoutInsets();
   const connection = useModuleConnection();
   const auto = connection.autoModule;
   const last = React.useRef(auto);

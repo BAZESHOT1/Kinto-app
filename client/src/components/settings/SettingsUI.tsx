@@ -9,6 +9,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
 import { MotiView } from 'moti';
 import { useTheme } from '../../theme/useTheme';
+import { CONTENT_BOTTOM_PAD, contentWidth, spacing } from '../../theme/layout';
 import { motion } from '../../theme/motion';
 import { useReducedMotion } from '../useReducedMotion';
 import { PressableScale } from '../profile/PressableScale';
@@ -174,7 +175,11 @@ export function SettingsPage({
   scroll?: boolean;
 }) {
   const theme = useTheme();
-  const body = <View style={{ paddingHorizontal: 16, paddingBottom: 120 }}>{children}</View>;
+  const body = (
+    <View style={{ width: '100%', maxWidth: contentWidth.settings, alignSelf: 'center', paddingHorizontal: spacing.md, paddingBottom: CONTENT_BOTTOM_PAD }}>
+      {children}
+    </View>
+  );
   return (
     <View style={{ flex: 1 }}>
       <View style={[styles.pageHead, { borderBottomColor: theme.line }]}>

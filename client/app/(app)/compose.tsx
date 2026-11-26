@@ -1,11 +1,12 @@
 import { safeBack } from '../../src/navigation/safeBack';
 import React, { useState } from 'react';
-import { Pressable, SafeAreaView, ScrollView, Text, TextInput, View, StyleSheet } from 'react-native';
+import { Pressable, ScrollView, Text, TextInput, View, StyleSheet } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useQueryClient } from '@tanstack/react-query';
 import * as api from '../../src/data/api';
 import { useTheme } from '../../src/theme/useTheme';
+import { CONTENT_BOTTOM_PAD } from '../../src/theme/layout';
 import { useCreateChat, humanError } from '../../src/data/queries';
 import { createAndShareChatKey } from '../../src/data/chatkit';
 import { refreshKeyBackup } from '../../src/data/auth';
@@ -116,7 +117,7 @@ export default function ComposeScreen() {
   ];
 
   return (
-    <SafeAreaView style={{ flex: 1, backgroundColor: theme.background }}>
+    <View style={{ flex: 1, backgroundColor: theme.background }}>
       <View style={[styles.header, { borderBottomColor: theme.line }]}>
         <Pressable onPress={() => safeBack(router, '/chats')} accessibilityLabel="Назад" accessibilityRole="button" style={styles.back}>
           <Ionicons name="close" size={22} color={theme.textSecondary} />
@@ -127,7 +128,7 @@ export default function ComposeScreen() {
       <ScrollView
         keyboardShouldPersistTaps="handled"
         showsVerticalScrollIndicator={false}
-        contentContainerStyle={{ padding: 16, gap: 10, paddingBottom: 120 }}
+        contentContainerStyle={{ padding: 16, gap: 10, paddingBottom: CONTENT_BOTTOM_PAD }}
       >
         <View style={[styles.tabs, { borderColor: theme.line, backgroundColor: theme.surface }]}>
           {tabs.map((t) => (
@@ -229,14 +230,13 @@ export default function ComposeScreen() {
           disabled={mode === 'direct' ? !peer.trim() : !title.trim()}
           onPress={() => void submit()}
         />
-        <View style={{ height: 90 }} />
       </ScrollView>
-    </SafeAreaView>
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
-  header: { paddingTop: 48, paddingHorizontal: 14, paddingBottom: 12, borderBottomWidth: 1, flexDirection: 'row', gap: 12, alignItems: 'center' },
+  header: { paddingTop: 12, paddingHorizontal: 14, paddingBottom: 12, borderBottomWidth: 1, flexDirection: 'row', gap: 12, alignItems: 'center' },
   back: { width: 40, height: 44, alignItems: 'center', justifyContent: 'center' },
   tabs: { flexDirection: 'row', gap: 2, borderWidth: 1, borderRadius: 14, padding: 3 },
   tab: { flex: 1, flexDirection: 'row', gap: 6, alignItems: 'center', justifyContent: 'center', paddingVertical: 9, borderRadius: 10 },

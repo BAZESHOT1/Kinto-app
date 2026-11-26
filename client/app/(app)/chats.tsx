@@ -29,7 +29,8 @@ import { Ionicons } from '@expo/vector-icons';
 import { Swipeable } from 'react-native-gesture-handler';
 import * as Haptics from 'expo-haptics';
 import { router } from 'expo-router';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useLayoutInsets } from '../../src/theme/useLayoutInsets';
+import { CONTENT_BOTTOM_PAD, listBottomReserve } from '../../src/theme/layout';
 import { useQueryClient } from '@tanstack/react-query';
 import { MotiView } from 'moti';
 import { useTheme } from '../../src/theme/useTheme';
@@ -532,7 +533,7 @@ export default function ChatsScreen() {
   const qc = useQueryClient();
   const haptics = useHaptics();
   const reduced = useReducedMotion();
-  const insets = useSafeAreaInsets();
+  const insets = useLayoutInsets();
 
   /* Ключи серверных чатов кэшируем заранее: иначе KMesh-отправка офлайн
    * падает с chat_key_missing, и сообщение не уходит через модуль. */
@@ -1994,9 +1995,8 @@ export default function ChatsScreen() {
             estimatedItemSize={86}
             drawDistance={900}
             contentContainerStyle={{
-              // Док плавающий: резервируем высоту капсулы + safe-area + 24px воздуха,
-              // чтобы последний чат не уходил под кнопки.
-              paddingBottom: Math.max(130, 60 + 12 + Math.max(0, insets.bottom) + 24),
+              // Док плавающий: единый резерв из layout-токенов.
+              paddingBottom: listBottomReserve(insets.bottom),
             }}
             ListFooterComponent={
               archivedChats.length ? (
@@ -2539,7 +2539,7 @@ function SearchResults({
         keyExtractor={(r, i) => `${rowKey(r)}-${i}`}
         keyboardShouldPersistTaps="handled"
         estimatedItemSize={72}
-        contentContainerStyle={{ paddingBottom: 130 }}
+        contentContainerStyle={{ paddingBottom: CONTENT_BOTTOM_PAD }}
         renderItem={({ item, index }) => {
           if (item.kind === 'section') {
             return (

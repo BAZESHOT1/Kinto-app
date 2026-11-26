@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { KeyboardAvoidingView, Platform, StyleSheet, Text, TextInput } from 'react-native';
+import { StyleSheet, Text, TextInput, View } from 'react-native';
 import { useLocalSearchParams } from 'expo-router';
 import { verifyEmail } from '../../src/data/auth';
 import { getSession } from '../../src/data/api';
@@ -46,7 +46,7 @@ export default function VerifyScreen() {
   }
 
   return (
-    <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1 }}>
+    <View style={{ flex: 1 }}>
       <AuthShell>
         <Text style={{ color: theme.textPrimary, fontWeight: '700', fontSize: theme.fontL }}>Подтверждение почты</Text>
         <Text style={{ color: theme.textSecondary, fontSize: 13, marginTop: 4, marginBottom: 14 }}>
@@ -79,7 +79,7 @@ export default function VerifyScreen() {
           {canResend ? 'Отправить код заново' : `Повторная отправка через ${resendLeft} с`}
         </Text>
       </AuthShell>
-    </KeyboardAvoidingView>
+    </View>
   );
 }
 

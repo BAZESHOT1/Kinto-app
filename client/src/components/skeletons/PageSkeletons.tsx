@@ -7,6 +7,7 @@ import React from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, View, type StyleProp, type ViewStyle } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '../../theme/useTheme';
+import { CONTENT_BOTTOM_PAD } from '../../theme/layout';
 import { SkeletonBlock, SkeletonChatRow, SkeletonCircle } from './Skeleton';
 
 function Card({ children, style }: { children: React.ReactNode; style?: StyleProp<ViewStyle> }) {
@@ -108,7 +109,7 @@ export function CardsSkeleton({ count = 4 }: { count?: number }) {
 export function ProfileSkeleton({ onBack }: { onBack?: () => void }) {
   const theme = useTheme();
   return (
-    <ScrollView contentContainerStyle={{ paddingBottom: 80 }} showsVerticalScrollIndicator={false}>
+    <ScrollView contentContainerStyle={{ paddingBottom: CONTENT_BOTTOM_PAD }} showsVerticalScrollIndicator={false}>
       <View style={styles.center}>
         <View style={styles.hero}>
           <SkeletonCircle size={168} />
@@ -170,7 +171,7 @@ export function ProfileSkeleton({ onBack }: { onBack?: () => void }) {
 export function ChatInfoSkeleton({ onBack }: { onBack?: () => void }) {
   const theme = useTheme();
   return (
-    <ScrollView contentContainerStyle={{ padding: 12, paddingBottom: 80 }} showsVerticalScrollIndicator={false}>
+    <ScrollView contentContainerStyle={{ padding: 12, paddingBottom: CONTENT_BOTTOM_PAD }} showsVerticalScrollIndicator={false}>
       <View style={styles.center}>
         <View style={styles.topRow}>
           <Pressable
