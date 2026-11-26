@@ -16,7 +16,10 @@ export async function createCallOffer(
   const track = stream.getAudioTracks()[0];
   if (!track) throw new Error('microphone_unavailable');
   // Ограничиваем битрейт sending-тренсceiver под выбранный канал.
-  const [sender] = stream.getAudioTracks().length ? pc.addTrack(track, stream) : [];
+  // RTCPeerConnection.addTrack() возвращает RTCRtpSender (НЕ массив).
+  // Деструктуризация `[sender] = pc.addTrack(...)` бросала
+  // "TypeError: ... is not iterable" при каждом запуске звонка.
+  const sender = stream.getAudioTracks().length ? pc.addTrack(track, stream) : null;
   if (sender && typeof sender.setParameters === 'function') {
     const params = sender.getParameters();
     const { min, max } = CALL_BITRATE[channel];

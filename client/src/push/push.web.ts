@@ -147,12 +147,24 @@ export async function registerWebPush(
       .catch((e) => console.warn('[push] Не удалось отправить токен на сервер:', e));
 
     // Foreground-сообщения (вкладка в фокусе) FCM не показывает сам.
+    // Одно сообщение может прийти дважды (FCM-токен ротируется, старый токен
+    // остаётся активным, поэтому multicast доставляет дубль ~через секунду).
+    const recent = new Map<string, number>();
+    const dedupeKey = (data: Record<string, unknown> | undefined, title: string, body: string) =>
+      String(data?.messageId ?? data?.message_id ?? `${data?.chatId ?? ''}|${title}|${body}`);
+
     const unsubscribe = onMessage(messaging, (payload) => {
       void (async () => {
       const hidden = await isPushContentHidden();
       const title = hidden ? 'Kinto' : (payload.notification?.title ?? payload.data?.title ?? 'Kinto');
       const body = hidden ? 'Новое сообщение' : (payload.notification?.body ?? payload.data?.body ?? '');
       const data = payload.data;
+
+      const key = dedupeKey(data, title, body);
+      const now = Date.now();
+      for (const [k, at] of recent) if (now - at > 10_000) recent.delete(k);
+      if (recent.has(key)) return;
+      recent.set(key, now);
 
       try {
         if (Notification.permission === 'granted') {
