@@ -10,7 +10,8 @@ import { useLocalSearchParams } from 'expo-router';
 import { useTheme } from '../../../../src/theme/useTheme';
 import { api } from '../../../../src/data/api';
 import { createOffer, type CallChannel, type CallSession } from '../../../../src/call';
-import { startMeshAudio } from '../../../../src/call/meshAudio.web';
+// Без явного .web — Metro сам выберет meshAudio.native.ts на iOS/Android.
+import { startMeshAudio } from '../../../../src/call/meshAudio';
 import { useStore } from '../../../../src/state/useStore';
 import { useModuleConnection } from '../../../../src/modules/ModuleProvider';
 

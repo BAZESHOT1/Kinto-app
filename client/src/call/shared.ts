@@ -16,12 +16,22 @@ export async function createCallOffer(
   const track = stream.getAudioTracks()[0];
   if (!track) throw new Error('microphone_unavailable');
   // Ограничиваем битрейт sending-тренсceiver под выбранный канал.
-  // RTCPeerConnection.addTrack() возвращает RTCRtpSender (НЕ массив) и
-  // всегда вызывается для выбранного трека. Ранее здесь было
-  // `const [sender] = length ? pc.addTrack(...) : []` — V8 выдавал ровно
-  // "TypeError: (intermediate value)(intermediate value)(intermediate value)
-  // is not iterable". Условное выражение убрано полностью.
-  const sender = pc.addTrack(track, stream);
+  // Раньше здесь было `const [sender] = length ? pc.addTrack(...) : []`,
+  // что давало ровно "(intermediate value)... is not iterable". Сейчас
+  // идём через addTransceiver(): в react-native-webrtc addTrack() внутри
+  // делает `const [existingSender] = this.getSenders().filter(...)` и тоже
+  // падает с этим TypeError, если мост вернул не-массив. addTransceiver не
+  // содержит такого деструктурирования и работает и в браузере, и нативе.
+  let sender: any = null;
+  try {
+    const transceiver = pc.addTransceiver(track, { direction: 'sendrecv', streams: [stream] });
+    sender = transceiver?.sender ?? null;
+  } catch {
+    sender = null;
+  }
+  if (!sender) {
+    try { sender = pc.addTrack(track, stream); } catch { sender = null; }
+  }
   if (sender && typeof sender.setParameters === 'function') {
     const params = sender.getParameters();
     const { min, max } = CALL_BITRATE[channel];
