@@ -4,7 +4,7 @@
  * На web подавляет выделение текста и контекстное меню браузера.
  */
 import React from 'react';
-import { Modal, Pressable, Text, View, StyleSheet, Platform } from 'react-native';
+import { Modal, Pressable, Text, View, StyleSheet, Platform, useWindowDimensions } from 'react-native';
 import { MotiView } from 'moti';
 import { useTheme } from '../../theme/useTheme';
 import { useReducedMotion } from '../useReducedMotion';
@@ -13,24 +13,41 @@ import { motion } from '../../theme/motion';
 
 export const QUICK_REACTIONS = ['👍', '❤️', '😂', '😮', '😢', '🔥'] as const;
 
+export type BubbleFrame = { x: number; y: number; width: number; height: number };
+
 export function ReactionPicker({
   visible,
   onClose,
   onPick,
   onMore,
+  anchor,
 }: {
   visible: boolean;
   onClose: () => void;
   onPick: (emoji: string) => void;
   onMore: () => void;
+  /** Экранные координаты сообщения — панель реакций всплывает над ним. */
+  anchor?: BubbleFrame | null;
 }) {
   const theme = useTheme();
   const reduced = useReducedMotion();
+  const { width: screenW, height: screenH } = useWindowDimensions();
+  const cardW = Math.min(360, screenW - 24);
+  const left = anchor
+    ? Math.max(12, Math.min(anchor.x + anchor.width / 2 - cardW / 2, screenW - cardW - 12))
+    : (screenW - cardW) / 2;
+  // Панель над сообщением; если места сверху мало — под ним.
+  const flip = anchor ? anchor.y < 90 : false;
+  const position = anchor
+    ? flip
+      ? { top: anchor.y + anchor.height + 8 }
+      : { bottom: screenH - anchor.y + 8 }
+    : { top: screenH / 2 };
 
   return (
     <Modal visible={visible} transparent animationType="none" onRequestClose={onClose}>
       <Pressable style={styles.backdrop} onPress={onClose} accessibilityLabel="Закрыть меню реакций">
-        <View pointerEvents="box-none" style={styles.center}>
+        <View pointerEvents="box-none" style={StyleSheet.absoluteFill}>
           <MotiView
             from={{ opacity: 0, scale: reduced ? 1 : 0.82, translateY: reduced ? 0 : 12 }}
             animate={{ opacity: 1, scale: 1, translateY: 0 }}
@@ -40,6 +57,11 @@ export function ReactionPicker({
               {
                 backgroundColor: theme.dark ? 'rgba(20,28,42,0.92)' : 'rgba(255,255,255,0.94)',
                 borderColor: theme.glassBorder,
+                position: 'absolute' as const,
+                left,
+                width: cardW,
+                justifyContent: 'center' as const,
+                ...position,
               },
               Platform.OS === 'web' ? ({ backdropFilter: 'blur(18px) saturate(1.4)' } as object) : null,
             ]}

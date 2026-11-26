@@ -92,7 +92,7 @@ export async function ensureWebPushPermission(): Promise<NotificationPermission 
  * Возвращает cleanup; при отсутствии поддержки, разрешения или VAPID-ключа
  * возвращает безвредный no-op и никогда не бросает исключение.
  */
-export async function registerWebPush(
+async function doRegisterWebPush(
   session: WebPushSession | null | undefined,
 ): Promise<WebPushCleanup> {
   if (!isWebPushSupported()) return noop;
@@ -207,4 +207,25 @@ export async function registerWebPush(
     console.warn('[push] Не удалось инициализировать web push:', e);
     return noop;
   }
+}
+
+/**
+ * Гарантия: ровно одна подписка на сообщения на вкладку. Без этого React/StrictMode
+ * и смена сессии создавали второй onMessage с собственным dedupe-мапом —
+ * пользователь видел два одинаковых уведомления с интервалом ~1 сек.
+ */
+let registrationPromise: Promise<WebPushCleanup> | null = null;
+
+export function registerWebPush(
+  session: WebPushSession | null | undefined,
+): Promise<WebPushCleanup> {
+  if (registrationPromise) return registrationPromise;
+  registrationPromise = doRegisterWebPush(session).then((stop) => () => {
+    stop();
+    registrationPromise = null;
+  }).catch((e) => {
+    registrationPromise = null;
+    return noop;
+  });
+  return registrationPromise;
 }

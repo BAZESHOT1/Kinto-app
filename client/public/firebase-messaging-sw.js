@@ -24,11 +24,16 @@ messaging.onBackgroundMessage((payload) => {
   const title = notification.title || data.title || 'Kinto';
   const body = notification.body || data.body || '';
 
+  // Стабильный tag сворачивает дубли в одну системную нотификацию даже если
+  // сообщение пришло и через SW, и через открытую вкладку.
+  const tag = String(data.messageId || data.message_id || data.chatId || data.chat_id || 'kinto');
   return self.registration.showNotification(title, {
     body: body,
     data: data,
     icon: '/icon-192.png',
     badge: '/icon-192.png',
+    tag,
+    renotify: false,
   });
 });
 

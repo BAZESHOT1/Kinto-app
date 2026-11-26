@@ -6,7 +6,7 @@
  * только при необходимости и анимируются пружиной.
  */
 import React from 'react';
-import { Animated, Modal, Pressable, Text, View, StyleSheet, useWindowDimensions, type LayoutChangeEvent, type StyleProp, type ViewStyle } from 'react-native';
+import { Animated, Modal, Platform, Pressable, Text, View, StyleSheet, useWindowDimensions, type LayoutChangeEvent, type StyleProp, type ViewStyle } from 'react-native';
 import Reanimated, { FadeOut, useAnimatedStyle, useSharedValue, withSpring } from 'react-native-reanimated';
 import { Ionicons } from '@expo/vector-icons';
 import { router, usePathname } from 'expo-router';
@@ -120,8 +120,8 @@ export function PhoneDock() {
   const tileWidth = dockWidth > 0 ? (dockWidth - DOCK_PADDING * 2 - TILE_GAP * (tiles.length - 1)) / tiles.length : 0;
   const onDockLayout = (e: LayoutChangeEvent) => setDockWidth(e.nativeEvent.layout.width);
   const enterTranslateY = enter.interpolate({ inputRange: [0, 1], outputRange: [16, 0] });
-  // Отступ дока от нижнего края — 4 px (раньше был 12 + safe-area).
-  const dockBottom = 4;
+  // На нативе отступ 12 px, в вебе — 4 px (там safe-area рисует CSS).
+  const dockBottom = Platform.OS === 'web' ? 4 : 12;
 
   const userMatch = /^\/user\/([^/]+)(?:\/edit)?/.exec(pathname);
   const viewingOtherProfile =

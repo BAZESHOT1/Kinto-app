@@ -109,7 +109,7 @@ export function SystemMessage({
 }: {
   item: ViewMessage;
   /** Долгое нажатие открывает обычный action sheet сообщения (удаление). */
-  onOpenMenu?: () => void;
+  onOpenMenu?: (frame: { x: number; y: number; width: number; height: number }) => void;
   onUsernamePress?: (username: string) => void;
 }) {
   const theme = useTheme();
@@ -131,7 +131,7 @@ export function SystemMessage({
   return (
     <View style={styles.systemRow}>
       <Pressable
-        onLongPress={onOpenMenu}
+        onLongPress={() => onOpenMenu?.({ x: 0, y: 120, width: 320, height: 40 })}
         delayLongPress={400}
         disabled={!onOpenMenu}
         accessibilityRole="button"
@@ -197,7 +197,7 @@ export function MessageBubble({
   onReply: () => void;
   onDelete: () => void;
   /** Кастомное меню (долгое нажатие). Если не задано — системный Alert. */
-  onOpenMenu?: () => void;
+  onOpenMenu?: (frame: { x: number; y: number; width: number; height: number }) => void;
   quoted?: QuotedMessage | null;
   onQuotePress?: () => void;
   /** Поисковый запрос для подсветки совпадений. */
@@ -291,6 +291,7 @@ export function MessageBubble({
 
   // Telegram-стиль: при удержании сообщение приподнимается, а меню actions
   // появляется под ним (анимает MessageActionSheet в тот же момент).
+  const bubbleRef = React.useRef<View>(null);
   const holdY = React.useRef(new Animated.Value(0)).current;
   const setHeld = React.useCallback((held: boolean) => {
     Animated.spring(holdY, {
@@ -449,10 +450,21 @@ export function MessageBubble({
         }}
       >
         <Pressable
+          ref={bubbleRef}
           onLongPress={() => {
-            setHeld(true);
-            (onOpenMenu ?? menu)();
-            setTimeout(() => setHeld(false), 900);
+            // Замеряем ДО подъёма — якорь должен быть реальным кадром сообщения.
+            bubbleRef.current?.measureInWindow((x, y, width, height) => {
+              setHeld(true);
+              if (onOpenMenu) onOpenMenu({ x, y, width, height });
+              else menu();
+              setTimeout(() => setHeld(false), 900);
+            });
+            if (!bubbleRef.current) {
+              setHeld(true);
+              if (onOpenMenu) onOpenMenu({ x: 0, y: 120, width: 320, height: 60 });
+              else menu();
+              setTimeout(() => setHeld(false), 900);
+            }
           }}
           onPressIn={() => setPressed(true)}
           onPressOut={() => { setPressed(false); setHeld(false); }}

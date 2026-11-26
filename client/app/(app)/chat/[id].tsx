@@ -174,6 +174,7 @@ function ChatScreen({ forcedId }: { forcedId?: string } = {}) {
   const [deleteChoice, setDeleteChoice] = useState<{ message: ViewMessage; buttons: Array<{ text: string; onPress: () => void }> } | null>(null);
   const [sheetMessage, setSheetMessage] = useState<ViewMessage | null>(null);
   const [reactionTarget, setReactionTarget] = useState<ViewMessage | null>(null);
+  const [menuAnchor, setMenuAnchor] = useState<{ x: number; y: number; width: number; height: number } | null>(null);
   const [menuOpen, setMenuOpen] = useState(false);
   const [activeCall, setActiveCall] = useState<{
     id: string; startedAt: number; durationMs: number; participants: number;
@@ -503,7 +504,6 @@ function ChatScreen({ forcedId }: { forcedId?: string } = {}) {
     setViewCounts({});
     setAsChannel(false);
     setPendingFiles([]);
-    setSecretShield(false);
     // Лента из кэша для нового чата: память + постоянное хранилище.
     setCachedMessages((getCachedMessages(chatId) as ViewMessage[] | null) ?? []);
     let alive = true;
@@ -712,25 +712,8 @@ function ChatScreen({ forcedId }: { forcedId?: string } = {}) {
     }
   }).current;
 
-  /* ------------------------------- защита секретного чата от скриншотов */
-  useEffect(() => {
-    if (!secret) {
-      setSecretShield(false);
-      return undefined;
-    }
-    // Native: expo-screen-capture не подключён — намеренный no-op.
-    if (Platform.OS !== 'web' || typeof document === 'undefined' || typeof window === 'undefined') return undefined;
-    const hide = () => setSecretShield(true);
-    const onVisibility = () => {
-      if (document.visibilityState === 'hidden') hide();
-    };
-    document.addEventListener('visibilitychange', onVisibility);
-    window.addEventListener('blur', hide);
-    return () => {
-      document.removeEventListener('visibilitychange', onVisibility);
-      window.removeEventListener('blur', hide);
-    };
-  }, [secret]);
+  // Экран приватности удалён вместе со специальным видом секретного чата:
+  // он выглядит и ведёт себя как обычный личный чат.
 
   const channel: ChatChannel = useMemo(() => {
     if (transportOnline) return 'internet';
@@ -1836,8 +1819,9 @@ function ChatScreen({ forcedId }: { forcedId?: string } = {}) {
                       onCopy={(t) => void copyMessageText(t)}
                       onReply={() => startReply(row.m)}
                       onDelete={() => confirmDelete(row.m)}
-                      onOpenMenu={() => {
+                      onOpenMenu={(frame) => {
                         if (Platform.OS === 'web') (globalThis as { getSelection?: () => Selection | null }).getSelection?.()?.removeAllRanges();
+                        setMenuAnchor(frame);
                         setReactionTarget(row.m);
                       }}
                       quoted={quotedFor(row.m)}
@@ -2279,6 +2263,7 @@ function ChatScreen({ forcedId }: { forcedId?: string } = {}) {
               onSend={(file) => onAttach(file)}
               onError={(message) => pushToast({ kind: 'error', message })}
               disabled={!canCompose}
+              maxSeconds={channel === 'internet' ? 3600 : 30}
             />
           ) : null}
           {text.trim() || editing || pendingFiles.length ? (
@@ -2332,7 +2317,8 @@ function ChatScreen({ forcedId }: { forcedId?: string } = {}) {
 
         <ReactionPicker
           visible={Boolean(reactionTarget)}
-          onClose={() => setReactionTarget(null)}
+          anchor={menuAnchor}
+          onClose={() => { setReactionTarget(null); setMenuAnchor(null); }}
           onPick={(emoji) => {
             if (reactionTarget) void reactTo(reactionTarget, emoji);
             setReactionTarget(null);
@@ -2347,9 +2333,10 @@ function ChatScreen({ forcedId }: { forcedId?: string } = {}) {
 
         <MessageActionSheet
           message={sheetMessage}
+          anchor={menuAnchor}
           pinned={Boolean(sheetMessage && pinned?.id === sheetMessage.id)}
           allowCopy={true}
-          onClose={() => setSheetMessage(null)}
+          onClose={() => { setSheetMessage(null); setMenuAnchor(null); }}
           onReact={(emoji) => sheetMessage && void reactTo(sheetMessage, emoji)}
           onReply={() => sheetMessage && startReply(sheetMessage)}
           onCopy={() => sheetMessage && void copyMessageText(sheetMessage.text ?? '')}

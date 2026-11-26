@@ -161,10 +161,13 @@ export function VoiceRecorder({
   onSend,
   onError,
   disabled,
+  maxSeconds = 3600,
 }: {
   onSend: (file: PickedFile) => void;
   onError?: (message: string) => void;
   disabled?: boolean;
+  /** Интернет: 60 минут; E-kMesh: 30 секунд. */
+  maxSeconds?: number;
 }) {
   const theme = useTheme();
   const reduced = useReducedMotion();
@@ -176,6 +179,7 @@ export function VoiceRecorder({
   const phaseRef = React.useRef(phase);
   phaseRef.current = phase;
   const timerRef = React.useRef<ReturnType<typeof setInterval> | null>(null);
+  const endRef = React.useRef<((cancel: boolean) => Promise<void>) | null>(null);
   const lift = React.useRef(new Animated.Value(0)).current;
 
   const haptic = React.useCallback((kind: 'light' | 'medium') => {
@@ -200,7 +204,16 @@ export function VoiceRecorder({
     haptic('medium');
     startingRef.current = engine.start().then(
       () => {
-        timerRef.current = setInterval(() => setSeconds((s) => (s >= 30 ? 30 : s + 1)), 1000);
+        timerRef.current = setInterval(() => {
+          setSeconds((s) => {
+            if (s + 1 >= maxSeconds) {
+              // Достигли лимита — реально останавливаем запись, а не только счётчик.
+              setTimeout(() => void endRef.current?.(false), 0);
+              return maxSeconds;
+            }
+            return s + 1;
+          });
+        }, 1000);
       },
       () => {
         engineRef.current = null;
@@ -230,6 +243,7 @@ export function VoiceRecorder({
     },
     [lift, onError, onSend],
   );
+  endRef.current = end;
 
   React.useEffect(
     () => () => {

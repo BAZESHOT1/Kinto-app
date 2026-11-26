@@ -2169,6 +2169,13 @@ const SearchField = React.forwardRef<
       style={styles.searchWrap}
     >
       {expanded ? <Ionicons name="search" size={18} color="#636366" /> : null}
+      {!expanded && !value ? (
+        <View pointerEvents="none" style={StyleSheet.absoluteFillObject}>
+          <Text style={{ textAlign: 'center', textAlignVertical: 'center', color: '#8E8E93', fontSize: 15 }}>
+            {placeholder}
+          </Text>
+        </View>
+      ) : null}
       <TextInput
         ref={ref}
         value={value}
@@ -2176,13 +2183,13 @@ const SearchField = React.forwardRef<
         onFocus={onFocus}
         onBlur={onBlur}
         onSubmitEditing={onSubmit}
-        placeholder={placeholder}
+        placeholder={expanded || value ? placeholder : undefined}
         placeholderTextColor="#636366"
         accessibilityLabel="Поиск людей, чатов, групп, каналов и сообщений"
         returnKeyType="search"
         autoCapitalize="none"
         autoCorrect={false}
-        style={[styles.searchInput, { color: theme.textPrimary, textAlign: expanded ? 'left' : 'center' }]}
+        style={[styles.searchInput, { color: theme.textPrimary, textAlign: value ? 'left' : 'center' }]}
       />
       {expanded && onClose ? (
         <Pressable

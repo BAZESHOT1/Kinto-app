@@ -219,8 +219,8 @@ export function SimpleFirmwareWizard({
     const tick = async () => {
       if (cancelled) return;
       const elapsed = Date.now() - (buildStartedAtRef.current || Date.now());
-      if (elapsed > 15 * 60 * 1000) {
-        setBuildError('Сборка идёт слишком долго (более 15 минут). Проверьте сборщик и попробуйте снова.');
+      if (elapsed > 45 * 60 * 1000) {
+        setBuildError('Сборка идёт слишком долго (более 45 минут). Проверьте сборщик и попробуйте снова.');
         setBuild((prev) => (prev ? { ...prev, status: 'failed' } : prev));
         return;
       }
@@ -228,6 +228,14 @@ export function SimpleFirmwareWizard({
         const next = await api.firmwareBuild(build.id);
         if (cancelled) return;
         buildErrorCountRef.current = 0;
+        if (next.status === 'failed') {
+          // Раньше здесь ошибка стиралась — в консоли и UI не было причины.
+          const reason = next.log || `Сборщик вернул failed (${next.phase ?? 'неизвестная фаза'}) без лога`;
+          console.warn('[fw] build failed', next.id, next.phase, reason);
+          setBuildError(reason);
+          setBuild(next);
+          return;
+        }
         setBuildError('');
         setBuild(next);
       } catch (error) {
@@ -236,7 +244,9 @@ export function SimpleFirmwareWizard({
         // 500/502/503/504 — транзиентные ответы Hub/прокси при переключении
         // лидера БД. Не помечаем сборку проваленной: продолжаем опрос.
         const message = error instanceof Error ? error.message : String(error);
-        const transient = /500|502|503|504|temporarily|временно/.test(message);
+        const status = (error as { status?: number }).status ?? 0;
+        const transient = [500, 502, 503, 504].includes(status) || /500|502|503|504|temporarily|временно|network|offline/i.test(message);
+        console.warn('[fw] status poll error', { status, message, count: buildErrorCountRef.current });
         if (!transient && buildErrorCountRef.current >= 5) {
           setBuildError(`Не удаётся получить статус сборки: ${message}. Нажмите «Повторить».`);
           setBuild((prev) => (prev ? { ...prev, status: 'failed' } : prev));

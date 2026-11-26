@@ -1,5 +1,5 @@
 import React from 'react';
-import { Modal, Platform, Pressable, StyleSheet, Text, View } from 'react-native';
+import { Modal, Platform, Pressable, ScrollView, StyleSheet, Text, View, useWindowDimensions } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import * as Haptics from 'expo-haptics';
 import { MotiView } from 'moti';
@@ -33,6 +33,7 @@ export function MessageActionSheet({
   onPin,
   onRetry,
   allowCopy = true,
+  anchor,
 }: {
   message: ViewMessage | null;
   pinned: boolean;
@@ -47,9 +48,18 @@ export function MessageActionSheet({
   onRetry?: () => void;
   /** Секретный чат: копирование/пересылка запрещены. */
   allowCopy?: boolean;
+  /** Экранные координаты сообщения — меню раскрывается под ним. */
+  anchor?: { x: number; y: number; width: number; height: number } | null;
 }) {
   const theme = useTheme();
   const open = Boolean(message);
+  const { width: screenW, height: screenH } = useWindowDimensions();
+  const cardW = Math.min(520, screenW - 24);
+  const top = anchor ? Math.min(anchor.y + anchor.height + 8, screenH * 0.55) : screenH * 0.35;
+  const left = anchor
+    ? Math.max(12, Math.min(anchor.x + anchor.width / 2 - cardW / 2, screenW - cardW - 12))
+    : (screenW - cardW) / 2;
+  const maxCardH = Math.max(160, screenH - top - 24);
 
   // Тактильный отклик при открытии меню (на web — no-op).
   React.useEffect(() => {
@@ -89,7 +99,27 @@ export function MessageActionSheet({
             from={{ opacity: 0, translateY: 36, scale: 0.98 }}
             animate={{ opacity: 1, translateY: 0, scale: 1 }}
             transition={{ type: 'spring', damping: 25, stiffness: 320 }}
-            style={[styles.sheet, { backgroundColor: theme.surfaceElevated, borderColor: theme.line, ...theme.shadow }]}
+            style={[
+              styles.sheet,
+              {
+                backgroundColor: theme.surfaceElevated,
+                borderColor: theme.line,
+                ...theme.shadow,
+                position: 'absolute' as const,
+                left,
+                top,
+                width: cardW,
+                maxHeight: maxCardH,
+                borderRadius: 20,
+                overflow: 'hidden' as const,
+              },
+            ]}
+          >
+          <ScrollView
+            showsVerticalScrollIndicator={false}
+            keyboardShouldPersistTaps="handled"
+            style={{ maxHeight: maxCardH }}
+            contentContainerStyle={{ paddingBottom: 10 }}
           >
             <View style={styles.grabber}>
               <View style={{ width: 38, height: 4, borderRadius: 2, backgroundColor: theme.line }} />
@@ -147,6 +177,7 @@ export function MessageActionSheet({
               danger
               onPress={onDelete}
             />
+          </ScrollView>
           </MotiView>
         ) : null}
       </View>
@@ -183,7 +214,7 @@ function Action({
 }
 
 const styles = StyleSheet.create({
-  root: { flex: 1, justifyContent: 'flex-end', alignItems: 'center' },
+  root: { flex: 1 },
   sheet: {
     width: '100%',
     maxWidth: 520,
