@@ -7,6 +7,7 @@ import * as api from './api';
 import type { Chat, Envelope, UserProfile } from './api';
 import { loadChatMessages, sendMessage, type ViewMessage } from './messaging';
 import { kmeshV1List } from './db';
+import { storage } from '../crypto/core';
 import { useStore } from '../state/useStore';
 import {
   getCachedChats,
@@ -65,6 +66,21 @@ export function useMe() {
   return query;
 }
 
+/**
+ * Секретный чат существует ТОЛЬКО на устройствах, где сохранён его ключ.
+ * Hub возвращает e2e-чаты всем участникам — скрываем те, ключа которых нет
+ * в локальном хранилище. Иначе чат «призрак» нельзя прочитать.
+ */
+async function onlyChatsWithLocalKeys<T extends { id: string; encryption?: string }>(
+  list: T[],
+): Promise<T[]> {
+  if (!list.some((c) => c.encryption === 'e2e')) return list;
+  let keys: Record<string, unknown> = {};
+  try { keys = (await storage.loadChatKeys()) ?? {}; } catch { keys = {}; }
+  const allowed = new Set(Object.keys(keys).filter((k) => Boolean(keys[k])));
+  return list.filter((c) => c.encryption !== 'e2e' || allowed.has(c.id));
+}
+
 export function useChats() {
   const me = useStore((s) => s.me);
   const username = me?.username;
@@ -72,10 +88,10 @@ export function useChats() {
     queryKey: [CHATS_KEY, username],
     queryFn: async () => {
       try {
-        return await api.api.listChats();
+        return await onlyChatsWithLocalKeys(await api.api.listChats());
       } catch (error) {
         const cached = username ? getCachedChats(username) : null;
-        if (cached) return cached;
+        if (cached) return onlyChatsWithLocalKeys(cached);
         // Без сервера и без кэша показываем пустой список, а не ошибку.
         if (!useStore.getState().transportOnline) return [];
         throw error;
@@ -104,7 +120,7 @@ export function useArchivedChats() {
   const me = useStore((s) => s.me);
   return useQuery({
     queryKey: [CHATS_KEY, 'archived'],
-    queryFn: () => api.api.listChats(true),
+    queryFn: async () => onlyChatsWithLocalKeys(await api.api.listChats(true)),
     enabled: Boolean(me),
     staleTime: STALE.chats,
     gcTime: 30 * 60_000,

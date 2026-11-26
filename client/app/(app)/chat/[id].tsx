@@ -26,6 +26,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Wallpaper } from '../../../src/components/Wallpaper';
 import { Glass, GLASS_FILL_BUTTON } from '../../../src/components/Glass';
 import { useTheme } from '../../../src/theme/useTheme';
+import { copyText } from '../../../src/utils/clipboard';
 import { useIsWide } from '../../../src/theme/useIsWide';
 import { MessageBubble, SystemMessage, type BubbleGroup, type QuotedMessage } from '../../../src/components/MessageBubble';
 import type { PickedFile } from '../../../src/components/file';
@@ -38,7 +39,6 @@ import { ChatMenu } from '../../../src/components/chat/ChatMenu';
 import { ChatSearchBar } from '../../../src/components/chat/ChatSearchBar';
 import { PinnedBanner } from '../../../src/components/chat/PinnedBanner';
 import { ReplyBar } from '../../../src/components/chat/ReplyBar';
-import { TypingIndicator } from '../../../src/components/chat/TypingIndicator';
 import { ScrollToBottom } from '../../../src/components/chat/ScrollToBottom';
 import { findCachedChat, getCachedMessages, loadCachedMessages, saveMessages } from '../../../src/data/cache';
 import { kmeshV1List, kmeshV1Remove } from '../../../src/data/db';
@@ -50,7 +50,6 @@ import { ReactionPicker } from '../../../src/components/chat/ReactionPicker';
 import { AttachmentsGallery } from '../../../src/components/chat/AttachmentsGallery';
 import { CommentsSheet, type CommentsPost } from '../../../src/components/chat/CommentsSheet';
 import { MediaAlbum } from '../../../src/components/chat/MediaAlbum';
-import { SecretBanner } from '../../../src/components/chat/SecretBanner';
 import { AttachmentMenu } from '../../../src/components/chat/AttachmentMenu';
 import { VoiceRecorder } from '../../../src/components/chat/VoiceRecorder';
 import { useChatMessages, humanError, useDeleteMessage, useSendChatMessage } from '../../../src/data/queries';
@@ -219,7 +218,6 @@ function ChatScreen({ forcedId }: { forcedId?: string } = {}) {
   /** Локально учтённые просмотры (после markMessageView). */
   const [viewCounts, setViewCounts] = useState<Record<string, number>>({});
   /** Оверлей приватности секретного чата. */
-  const [secretShield, setSecretShield] = useState(false);
   /** Клавиатура открыта: композер не должен добивать safe-area снизу. */
   const [keyboardOpen, setKeyboardOpen] = useState(false);
   const [keyboardHeight, setKeyboardHeight] = useState(0);
@@ -1485,20 +1483,10 @@ function ChatScreen({ forcedId }: { forcedId?: string } = {}) {
   }, [text, chatId, editing, canCompose]);
 
   /* ------------------------------------------------------------- действия */
-  async function copyText(value: string) {
+  async function copyMessageText(value: string) {
     setSheetMessage(null);
-    if (!value) return;
-    try {
-      if (Platform.OS === 'web' && typeof navigator !== 'undefined' && navigator.clipboard) {
-        await navigator.clipboard.writeText(value);
-      } else {
-        const { Clipboard } = await import('react-native');
-        Clipboard.setString(value);
-      }
-      pushToast({ kind: 'success', message: 'Скопировано' });
-    } catch {
-      pushToast({ kind: 'error', message: 'Не удалось скопировать' });
-    }
+    const ok = await copyText(value);
+    pushToast({ kind: ok ? 'success' : 'error', message: ok ? 'Скопировано' : 'Не удалось скопировать' });
   }
 
   function startReply(m: ViewMessage) {
@@ -1831,7 +1819,7 @@ function ChatScreen({ forcedId }: { forcedId?: string } = {}) {
                       item={row.m}
                       group={row.group}
                       post={isChannel}
-                      onCopy={(t) => void copyText(t)}
+                      onCopy={(t) => void copyMessageText(t)}
                       onReply={() => startReply(row.m)}
                       onDelete={() => confirmDelete(row.m)}
                       onOpenMenu={() => {
@@ -1920,7 +1908,7 @@ function ChatScreen({ forcedId }: { forcedId?: string } = {}) {
           marginTop: -((insets.top || 12) + 12),
           // Акцентная рамка вокруг экрана секретного чата.
           borderWidth: secret ? 1.5 : 0,
-          borderColor: secret ? theme.accent : 'transparent',
+          borderColor: 'transparent',
         }}
       >
         <Wallpaper image={chat?.background ?? null} bleed />
@@ -1929,7 +1917,6 @@ function ChatScreen({ forcedId }: { forcedId?: string } = {}) {
           channel={channel}
           linkMode={linkMode}
           statusPhase={connectionPhase}
-          secret={secret}
           typingUsername={typingUsername}
           scrollY={scrollY}
           collapse={headerCollapse}
@@ -1969,7 +1956,6 @@ function ChatScreen({ forcedId }: { forcedId?: string } = {}) {
           </View>
         ) : null}
 
-        {secret ? <SecretBanner /> : null}
 
         {pinned ? (
           <PinnedBanner
@@ -2011,7 +1997,13 @@ function ChatScreen({ forcedId }: { forcedId?: string } = {}) {
 
         <View style={{ flex: 1 }}>
           {(chatQuery.isLoading || !chat) && allMessages.length === 0 ? (
-            <SkeletonMessages count={8} />
+            <MotiView
+              from={{ opacity: 0, translateY: 6 }}
+              animate={{ opacity: 1, translateY: 0 }}
+              transition={reduced ? { type: 'timing', duration: 0 } : motion.quick}
+            >
+              <SkeletonMessages count={8} />
+            </MotiView>
           ) : allMessages.length === 0 ? (
             canCompose ? (
               <EmptyState title="Пустой чат" subtitle="Сообщений нет — напишите первым" />
@@ -2108,7 +2100,7 @@ function ChatScreen({ forcedId }: { forcedId?: string } = {}) {
           />
         </View>
 
-        {typingUsername ? <TypingIndicator username={typingUsername} /> : null}
+        {/* «печатает» показываем только в шапке чата — дубль над композером убран. */}
 
         {dropBusy ? (
           <MotiView
@@ -2302,11 +2294,11 @@ function ChatScreen({ forcedId }: { forcedId?: string } = {}) {
         <MessageActionSheet
           message={sheetMessage}
           pinned={Boolean(sheetMessage && pinned?.id === sheetMessage.id)}
-          allowCopy={!secret}
+          allowCopy={true}
           onClose={() => setSheetMessage(null)}
           onReact={(emoji) => sheetMessage && void reactTo(sheetMessage, emoji)}
           onReply={() => sheetMessage && startReply(sheetMessage)}
-          onCopy={() => sheetMessage && void copyText(sheetMessage.text ?? '')}
+          onCopy={() => sheetMessage && void copyMessageText(sheetMessage.text ?? '')}
           onEdit={() => sheetMessage && startEdit(sheetMessage)}
           onDelete={() => sheetMessage && confirmDelete(sheetMessage)}
           onPin={() => void pinMessage(sheetMessage)}
@@ -2339,42 +2331,6 @@ function ChatScreen({ forcedId }: { forcedId?: string } = {}) {
           </View>
         ) : null}
 
-        {secret && secretShield ? (
-          <View
-            style={[
-              StyleSheet.absoluteFillObject,
-              styles.secretShield,
-              Platform.OS === 'web' ? ({ backdropFilter: 'blur(18px)', WebkitBackdropFilter: 'blur(18px)' } as object) : null,
-            ]}
-          >
-            <MotiView
-              from={reduced ? { opacity: 1 } : { opacity: 0, scale: 0.94 }}
-              animate={{ opacity: 1, scale: 1 }}
-              transition={reduced ? { type: 'timing', duration: 0 } : motion.softSpring}
-              style={[styles.secretCard, { backgroundColor: theme.surfaceElevated, borderColor: theme.accent, ...theme.shadow }]}
-            >
-              <View style={[styles.secretIcon, { backgroundColor: theme.accentSoft }]}>
-                <Ionicons name="eye-off" size={26} color={theme.accent} />
-              </View>
-              <Text style={{ color: theme.textPrimary, fontSize: 16, fontWeight: '800' }}>Содержимое скрыто</Text>
-              <Text style={{ color: theme.textSecondary, fontSize: 12.5, textAlign: 'center' }}>
-                Секретный чат скрывается при потере фокуса или переключении вкладки
-              </Text>
-              <Pressable
-                onPress={() => setSecretShield(false)}
-                accessibilityRole="button"
-                accessibilityLabel="Показать содержимое чата"
-                style={({ pressed }) => [
-                  styles.secretShow,
-                  { backgroundColor: theme.accent, opacity: pressed ? 0.85 : 1 },
-                ]}
-              >
-                <Ionicons name="eye" size={16} color={theme.onAccent} />
-                <Text style={{ color: theme.onAccent, fontSize: 13, fontWeight: '700' }}>Показать</Text>
-              </Pressable>
-            </MotiView>
-          </View>
-        ) : null}
       </View>
 
       <Modal visible={Boolean(deleteChoice)} transparent animationType="fade" onRequestClose={() => setDeleteChoice(null)}>

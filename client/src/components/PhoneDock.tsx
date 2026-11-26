@@ -42,12 +42,8 @@ export function PhoneDock() {
   const me = useStore((s) => s.me);
   const myUsername = useStore((s) => s.me?.username ?? s.session?.username ?? '');
   const mutedChats = useStore((s) => s.mutedChats);
-  const transportOnline = useStore((s) => s.transportOnline);
-  const transportKnown = useStore((s) => s.transportKnown);
   const directPeer = useStore((s) => s.transportDirectPeer);
   const transportModule = useStore((s) => s.transportModule);
-  const transportGateway = useStore((s) => s.transportGateway);
-  const meshIncomingActive = useStore((s) => s.meshIncomingActive);
   const meshPeers = useStore((s) => s.meshPeers);
 
   const [dockWidth, setDockWidth] = React.useState(0);
@@ -136,28 +132,8 @@ export function PhoneDock() {
     pathname.startsWith('/chats') || pathname.startsWith('/settings') || viewingOtherProfile;
   if (!dockVisible) return null;
 
-  const syncing = chats.isLoading || (chats.isFetching && !chats.data);
-  const moduleConnected = Boolean(transportModule || directPeer);
-  // Если работаем через модуль, доступность Hub определяет шлюз кластера,
-  // а не интернет самого телефона.
-  // Если модуль подключён и по mesh уже шёл трафик (presence/ACK), кластер
-  // живой — даже когда INFO ещё не успел выставить gateway-бит.
-  const clusterOnline = moduleConnected
-    ? Boolean(transportGateway || transportOnline || meshIncomingActive)
-    : Boolean(transportOnline);
-  const showLeft =
-    syncing ||
-    (moduleConnected ? !clusterOnline : !transportKnown || !transportOnline);
-  const leftText = moduleConnected
-    ? clusterOnline
-      ? transportGateway
-        ? 'Синхронизация...'
-        : 'Кластер: mesh'
-      : 'Кластер: локально'
-    : !transportOnline
-      ? 'Соединение...'
-      : 'Обновление...';
-
+  // Капсула «Соединение/Обновление» слева от навбара убрана: статус уже
+  // показывается в строке поиска на странице чатов.
   const moduleOn = Boolean(transportModule || directPeer);
   const routeCount = Math.max(1, Object.keys(meshPeers || {}).length + 1);
 
@@ -169,21 +145,8 @@ export function PhoneDock() {
         { bottom: dockBottom, opacity: enter, transform: [{ translateY: enterTranslateY }], gap: compact ? 6 : 8 },
       ]}
     >
-      {/* Левая капсула статуса сети/синхронизации. */}
-      {showLeft ? (
-        <SideCapsule
-          fromX={-20}
-          reduced={reduced}
-          style={[styles.sideCapsule, { backgroundColor: theme.dark ? '#161618' : 'rgba(255,255,255,0.92)', borderColor: theme.dark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.08)', maxWidth: narrow ? 66 : compact ? 74 : 96 }]}
-        >
-          <View style={[styles.dot, { backgroundColor: clusterOnline ? '#30D158' : '#FF9F0A' }]} />
-          <Text numberOfLines={1} style={[styles.sideText, { color: theme.dark ? '#D1D1D6' : theme.textPrimary }]}>
-            {leftText}
-          </Text>
-        </SideCapsule>
-      ) : (
-        <View style={styles.sideSpacer} />
-      )}
+      {/* Капсулы статуса слева больше нет — держим место для центрирования дока. */}
+      <View style={styles.sideSpacer} />
 
       <Glass
         onLayout={onDockLayout}

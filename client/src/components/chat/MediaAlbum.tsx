@@ -224,7 +224,6 @@ export function MediaAlbum({
               <Text style={{ color: theme.textSecondary, fontSize: 11 }}>{viewsCount}</Text>
             </>
           ) : null}
-          {first?.scheme === 'e2e' ? <Ionicons name="lock-closed" size={10} color={theme.accent} /> : null}
           <Text style={{ color: theme.textSecondary, fontSize: 10.5 }}>
             {fmtTime(last?.createdAt ?? first?.createdAt ?? '')}
           </Text>

@@ -21,12 +21,8 @@ import {
 } from './types';
 
 async function copyToClipboard(value: string): Promise<void> {
-  if (Platform.OS === 'web' && typeof navigator !== 'undefined' && navigator.clipboard) {
-    await navigator.clipboard.writeText(value);
-    return;
-  }
-  const { Clipboard } = await import('react-native');
-  Clipboard.setString(value);
+  const { copyText } = await import('../../utils/clipboard');
+  await copyText(value);
 }
 
 export function HubStep({

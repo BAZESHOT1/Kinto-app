@@ -10,29 +10,11 @@ import { useStore } from '../../state/useStore';
 import { ProfileModal } from './ProfileModal';
 import { glassStyle } from './Glass';
 
-/**
- * Копирование ссылки: clipboard API на web, Share/Clipboard на нативе.
- * expo-clipboard не подключён, поэтому используем доступные fallback-и.
- */
+/** Копирование ссылки через единый безопасный helper (expo-clipboard). */
 export async function copyText(value: string): Promise<void> {
-  if (Platform.OS === 'web' && typeof navigator !== 'undefined' && navigator.clipboard) {
-    await navigator.clipboard.writeText(value);
-    return;
-  }
-  try {
-    const mod: any = await import('react-native');
-    if (mod?.Clipboard?.setString) {
-      mod.Clipboard.setString(value);
-      return;
-    }
-    if (mod?.Share?.share) {
-      await mod.Share.share({ message: value, url: value });
-      return;
-    }
-  } catch {
-    /* ниже общий fallback */
-  }
-  throw new Error('clipboard_unavailable');
+  const { copyText: safeCopy } = await import('../../utils/clipboard');
+  const ok = await safeCopy(value);
+  if (!ok) throw new Error('clipboard_unavailable');
 }
 
 /** Системный шеринг; на web без navigator.share просто копируем ссылку. */

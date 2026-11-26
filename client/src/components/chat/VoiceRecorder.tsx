@@ -34,7 +34,8 @@ function webEngine(): Engine {
   return {
     async start() {
       stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      const preferred = ['audio/webm;codecs=opus', 'audio/webm', 'audio/ogg;codecs=opus', 'audio/mp4'];
+      // Сначала AAC/M4A — единый кодек со всеми нативными сборками.
+      const preferred = ['audio/mp4', 'audio/mp4;codecs=mp4a.40.2', 'audio/webm;codecs=opus', 'audio/webm', 'audio/ogg;codecs=opus'];
       mime = preferred.find((m) => {
         try {
           return MediaRecorder.isTypeSupported(m);
@@ -91,7 +92,31 @@ function nativeEngine(): Engine {
       const perm = await Audio.requestPermissionsAsync();
       if (!perm.granted) throw new Error('no_permission');
       await Audio.setAudioModeAsync({ allowsRecordingIOS: true, playsInSilentModeIOS: true });
-      const created = await Audio.Recording.createAsync(Audio.RecordingOptionsPresets.HIGH_QUALITY);
+      // Универсальный кодек: AAC-LC mono в M4A, 24 kHz / 24 kbps.
+      // Читается и iOS (AVFoundation), и Android, и всеми браузерами;
+      // 30 с ≈ 90 КБ — по mesh идёт зашифрованный объект, а не PCM.
+      const preset = Audio.RecordingOptionsPresets.HIGH_QUALITY;
+      const created = await Audio.Recording.createAsync({
+        ...preset,
+        ios: {
+          ...preset.ios,
+          extension: '.m4a',
+          outputFormat: Audio.IOSOutputFormat.MPEG4AAC,
+          audioQuality: Audio.IOSAudioQuality.MIN,
+          sampleRate: 24000,
+          numberOfChannels: 1,
+          bitRate: 24000,
+        },
+        android: {
+          ...preset.android,
+          extension: '.m4a',
+          outputFormat: Audio.AndroidOutputFormat.MPEG_4,
+          audioEncoder: Audio.AndroidAudioEncoder.AAC,
+          sampleRate: 24000,
+          bitRate: 24000,
+          numberOfChannels: 1,
+        },
+      });
       recording = created.recording;
     },
     async stop(cancel) {
@@ -175,7 +200,7 @@ export function VoiceRecorder({
     haptic('medium');
     startingRef.current = engine.start().then(
       () => {
-        timerRef.current = setInterval(() => setSeconds((s) => s + 1), 1000);
+        timerRef.current = setInterval(() => setSeconds((s) => (s >= 30 ? 30 : s + 1)), 1000);
       },
       () => {
         engineRef.current = null;

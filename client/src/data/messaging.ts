@@ -541,6 +541,11 @@ export async function flushOutbox(myUsername: string): Promise<ViewMessage[]> {
   for (const item of items) {
     const ok = await sendOutboxItem(item, myUsername);
     if (!ok) continue;
+    const extra = item as OutboxItem & {
+      text?: string;
+      file?: ViewMessage['file'];
+      files?: ViewMessage['files'];
+    };
     out.push({
       id: item.clientId,
       seq: Number.MAX_SAFE_INTEGER,
@@ -548,6 +553,9 @@ export async function flushOutbox(myUsername: string): Promise<ViewMessage[]> {
       mine: true,
       createdAt: item.createdAt,
       kind: item.kind,
+      text: extra.text,
+      file: extra.file,
+      files: extra.files,
       delivered: true,
       failed: false,
       pending: false,
@@ -1026,7 +1034,7 @@ export async function attachManyAndSendWithProgress(
 /** Старый путь одного файла (используется VoiceRecorder и запасными вызовами). */
 export async function attachAndSendWithProgressLegacy(
   chatId: string,
-  file: { bytes: Uint8Array; name: string; mime: string },
+  file: { bytes: Uint8Array; name: string; mime: string; duration?: number },
   myUsername: string,
   opts: AttachSendOptions = {},
   callbacks: AttachProgressCallbacks = {},
@@ -1078,6 +1086,7 @@ export async function attachAndSendWithProgressLegacy(
         name: file.name,
         mime: compressed.mime,
         size: compressed.bytes.length,
+        duration: file.duration,
       },
     };
     const message = await sendMessage(chatId, payload, 'media', myUsername, {

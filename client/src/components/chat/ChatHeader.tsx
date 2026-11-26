@@ -79,7 +79,6 @@ function StatusDot({ color, waiting }: { color: string; waiting: boolean }) {
 export function ChatHeader({
   title,
   channel,
-  secret,
   typingUsername,
   scrollY,
   collapse,
@@ -101,7 +100,6 @@ export function ChatHeader({
 }: {
   title: string;
   channel: ChatChannel;
-  secret: boolean;
   typingUsername?: string | null;
   scrollY: Animated.Value;
   /** 0 — развёрнута, 1 — свёрнута; управляется экраном по направлению скролла. */
@@ -174,9 +172,7 @@ export function ChatHeader({
     ? `${typingUsername} печатает…`
     : statusText
       ? statusText
-      : secret
-        ? '🔒 Секретный (E2E)'
-        : chatType === 'channel' && membersCount
+      : chatType === 'channel' && membersCount
           ? `${membersCount} ${plural(membersCount, 'подписчик', 'подписчика', 'подписчиков')}`
           : chatType === 'group' && membersCount
             ? `${membersCount} ${plural(membersCount, 'участник', 'участника', 'участников')}`
@@ -216,7 +212,6 @@ export function ChatHeader({
         >
           <Glass transparent radius={wide ? 24 : 29} fill={GLASS_FILL_BUTTON} style={[styles.pill, wide && { height: 50 }]}>
             <View style={{ flexDirection: 'row', alignItems: 'center', maxWidth: '100%' }}>
-              {secret ? <Ionicons name="lock-closed" size={14} color={theme.accent} style={{ marginRight: 5 }} /> : null}
               {statusPhase === 'connecting' || statusPhase === 'updating' ? (
                 <MotiView
                   key={`phase-${statusPhase}`}
@@ -227,9 +222,16 @@ export function ChatHeader({
                   <ConnectionIndicator phase={statusPhase} size="large" />
                 </MotiView>
               ) : (
-                <Text numberOfLines={1} style={{ color: theme.textPrimary, fontWeight: '800', fontSize: titleSize, flexShrink: 1 }}>
-                  {title || 'Диалог'}
-                </Text>
+                <MotiView
+                  key={`title-${title}`}
+                  from={reduced ? { opacity: 1 } : { opacity: 0, translateY: -3 }}
+                  animate={{ opacity: 1, translateY: 0 }}
+                  transition={reduced ? { type: 'timing', duration: 0 } : motion.quick}
+                >
+                  <Text numberOfLines={1} style={{ color: theme.textPrimary, fontWeight: '800', fontSize: titleSize, flexShrink: 1 }}>
+                    {title || 'Диалог'}
+                  </Text>
+                </MotiView>
               )}
             </View>
             <MotiView

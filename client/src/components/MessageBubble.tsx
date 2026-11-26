@@ -289,6 +289,18 @@ export function MessageBubble({
     [onReply, replyHaptic, swipeX],
   );
 
+  // Telegram-стиль: при удержании сообщение приподнимается, а меню actions
+  // появляется под ним (анимает MessageActionSheet в тот же момент).
+  const holdY = React.useRef(new Animated.Value(0)).current;
+  const setHeld = React.useCallback((held: boolean) => {
+    Animated.spring(holdY, {
+      toValue: held && !reduced ? -12 : 0,
+      damping: motion.pressSpring.damping,
+      stiffness: motion.pressSpring.stiffness,
+      useNativeDriver: true,
+    }).start();
+  }, [holdY, reduced]);
+
   const setPressed = React.useCallback(
     (pressed: boolean) => {
       if (reduced) {
@@ -332,8 +344,8 @@ export function MessageBubble({
 
   const menu = () => {
     const buttons: { text: string; onPress?: () => void; style?: 'destructive' | 'cancel' }[] = [];
-    // В секретном чате копирование (как и пересылка) запрещено.
-    if (!secret) buttons.push({ text: 'Копировать', onPress: () => onCopy(item.text ?? '') });
+    // Секретный чат выглядит как обычный — копирование доступно везде.
+    buttons.push({ text: 'Копировать', onPress: () => onCopy(item.text ?? '') });
     buttons.push({ text: 'Ответить', onPress: onReply });
     if (item.mine) buttons.push({ text: 'Удалить', style: 'destructive', onPress: onDelete });
     buttons.push({ text: 'Отмена', style: 'cancel' });
@@ -433,13 +445,17 @@ export function MessageBubble({
       <Animated.View
         style={{
           maxWidth: post ? '100%' : showAvatar ? '78%' : '86%',
-          transform: [{ scale: pressScale }],
+          transform: [{ scale: pressScale }, { translateY: holdY }],
         }}
       >
         <Pressable
-          onLongPress={onOpenMenu ?? menu}
+          onLongPress={() => {
+            setHeld(true);
+            (onOpenMenu ?? menu)();
+            setTimeout(() => setHeld(false), 900);
+          }}
           onPressIn={() => setPressed(true)}
-          onPressOut={() => setPressed(false)}
+          onPressOut={() => { setPressed(false); setHeld(false); }}
           delayLongPress={400}
           {...(Platform.OS === 'web'
             ? { onContextMenu: (e: { preventDefault: () => void }) => e.preventDefault() }
@@ -616,7 +632,6 @@ export function MessageBubble({
           ) : null}
 
           <View style={styles.metaRow}>
-            {ext.scheme === 'e2e' ? <Ionicons name="lock-closed" size={10} color={item.mine ? mineSub : theme.accent} /> : null}
             {viewsCount != null ? (
               <>
                 <Ionicons name="eye-outline" size={12} color={item.mine ? mineSub : theme.textSecondary} />

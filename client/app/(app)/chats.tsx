@@ -1132,7 +1132,7 @@ export default function ChatsScreen() {
       });
       try {
         const existing = everyChat.find(
-          (c) => c.type === 'direct' && c.members.some((m) => m.username === user.username),
+          (c) => c.type === 'direct' && c.encryption !== 'e2e' && c.members.some((m) => m.username === user.username),
         );
         if (existing) {
           openChat(existing);
@@ -1947,10 +1947,24 @@ export default function ChatsScreen() {
       {(error || queryError) && transportOnline ? (
         <Text style={{ color: theme.danger, marginTop: 8, fontSize: 13 }}>{error || queryError}</Text>
       ) : null}
-      {meshRefreshing && !search.trim() ? <MeshLoadingBar theme={theme} label="Обновление чатов через kMesh…" /> : null}
+      {meshRefreshing && !search.trim() ? (
+        <MotiView
+          from={{ opacity: 0, translateY: -6 }}
+          animate={{ opacity: 1, translateY: 0 }}
+          transition={reduced ? { type: 'timing', duration: 0 } : motion.quick}
+        >
+          <MeshLoadingBar theme={theme} label="Обновление чатов через kMesh…" />
+        </MotiView>
+      ) : null}
 
       {chats.isLoading ? (
-        <SkeletonChatList rows={8} />
+        <MotiView
+          from={{ opacity: 0, translateY: 6 }}
+          animate={{ opacity: 1, translateY: 0 }}
+          transition={reduced ? { type: 'timing', duration: 0 } : motion.quick}
+        >
+          <SkeletonChatList rows={8} />
+        </MotiView>
       ) : noChats ? (
         <View style={{ flex: 1 }}>
           <EmptyState
@@ -2773,7 +2787,6 @@ function ChatRow({
       <View style={{ flex: 1, minWidth: 0 }}>
         <View style={{ flexDirection: 'row', justifyContent: 'space-between', gap: 8, alignItems: 'center' }}>
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5, flexShrink: 1 }}>
-            {chat.encryption === 'e2e' ? <Ionicons name="lock-closed" size={12} color={theme.textSecondary} /> : null}
             <Text style={{ color: theme.textPrimary, fontWeight: '600', fontSize: 17, flexShrink: 1 }} numberOfLines={1}>
               {title}
             </Text>

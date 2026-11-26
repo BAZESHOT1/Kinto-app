@@ -16,7 +16,9 @@ export function directPeerFromParam(id: string): string | null {
 }
 
 /** Ссылка на чат: личный — /chat/@username, остальные — по id. */
-export function chatHref(chat: { id: string; type?: string; members?: Array<{ username: string }> }, myUsername: string, suffix = ''): string {
+export function chatHref(chat: { id: string; type?: string; encryption?: string; members?: Array<{ username: string }> }, myUsername: string, suffix = ''): string {
+  // Секретный чат НЕ связан с обычным личным: всегда ссылаемся по его id.
+  if (chat.encryption === 'e2e') return `/chat/${chat.id}${suffix}`;
   if (chat.type === 'direct') {
     const peer = chat.members?.find((m) => m.username.toLowerCase() !== myUsername.toLowerCase());
     if (peer?.username) return `/chat/@${peer.username}${suffix}`;
@@ -36,7 +38,7 @@ export function DirectChatResolver({ username, render }: { username: string; ren
     const lists = qc.getQueriesData<api.Chat[]>({ queryKey: ['chats'] });
     for (const [, list] of lists) {
       const found = (Array.isArray(list) ? list : []).find(
-        (c) => c?.type === 'direct' && c.members?.some((m) => m.username.toLowerCase() === username && m.username.toLowerCase() !== me.toLowerCase()),
+        (c) => c?.type === 'direct' && c.encryption !== 'e2e' && c.members?.some((m) => m.username.toLowerCase() === username && m.username.toLowerCase() !== me.toLowerCase()),
       );
       if (found) {
         setChatId(found.id);

@@ -3,6 +3,7 @@ import { Modal, Platform, Pressable, StyleSheet, Text, View } from 'react-native
 import { Ionicons } from '@expo/vector-icons';
 import * as Haptics from 'expo-haptics';
 import { MotiView } from 'moti';
+import { BlurView } from 'expo-blur';
 import { useTheme } from '../../theme/useTheme';
 import type { ViewMessage } from '../../data/messaging';
 
@@ -74,7 +75,15 @@ export function MessageActionSheet({
           onPress={onClose}
           accessibilityRole="button"
           accessibilityLabel="Закрыть меню сообщения"
-        />
+        >
+          {/* Размытие фона одновременно с подъёмом сообщения и выездом меню. */}
+          <BlurView
+            intensity={40}
+            tint={theme.dark ? 'dark' : 'light'}
+            style={StyleSheet.absoluteFill}
+            pointerEvents="none"
+          />
+        </Pressable>
         {message ? (
           <MotiView
             from={{ opacity: 0, translateY: 36, scale: 0.98 }}
