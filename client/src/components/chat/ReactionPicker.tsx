@@ -1,17 +1,29 @@
 /**
- * Быстрое меню реакций по долгому нажатию на сообщение.
- * Показывает только эмодзи-панель; «⋯» открывает полное меню действий.
- * На web подавляет выделение текста и контекстное меню браузера.
+ * Панель реакций по долгому нажатию на сообщение — в стиле Telegram:
+ * стеклянная «пилюля» с быстрыми эмодзи и круглой кнопкой-шевроном, которая раскрывает полный набор.
+ * Панель выравнивается по стороне сообщения (своё — вправо, чужое — влево) и стоит над ним.
  */
 import React from 'react';
-import { Text, View, StyleSheet, Platform, useWindowDimensions } from 'react-native';
+import { Platform, ScrollView, StyleSheet, Text, View, useWindowDimensions } from 'react-native';
+import { BlurView } from 'expo-blur';
+import { Ionicons } from '@expo/vector-icons';
 import { MotiView } from 'moti';
 import { useTheme } from '../../theme/useTheme';
 import { useReducedMotion } from '../useReducedMotion';
 import { PressableScale } from './PressableScale';
 import { motion } from '../../theme/motion';
 
-export const QUICK_REACTIONS = ['👍', '❤️', '😂', '😮', '😢', '🔥'] as const;
+export const QUICK_REACTIONS = ['❤️', '👍', '😂', '😮', '😢', '🔥', '🙏'] as const;
+
+/** Полный набор — раскрывается шевроном. */
+const MORE_REACTIONS = [
+  '👍', '👎', '❤️', '🔥', '🥰', '👏', '😁', '🤔',
+  '🤯', '😱', '🤬', '😢', '🎉', '🤩', '🤮', '💩',
+  '🙏', '👌', '🕊', '🤡', '🥱', '🥴', '😍', '🐳',
+  '❤️‍🔥', '🌚', '🌭', '💯', '🤣', '⚡', '🍌', '🏆',
+  '💔', '🤨', '😐', '🍓', '🍾', '💋', '🖕', '😈',
+  '😴', '😭', '🤓', '👻', '👨‍💻', '👀', '🎃', '🙈',
+] as const;
 
 export type BubbleFrame = { x: number; y: number; width: number; height: number };
 
@@ -19,25 +31,33 @@ export function ReactionPicker({
   visible,
   onClose,
   onPick,
-  onMore,
   anchor,
+  mine = false,
 }: {
   visible: boolean;
   onClose: () => void;
   onPick: (emoji: string) => void;
-  onMore: () => void;
-  /** Экранные координаты сообщения — панель реакций всплывает над ним. */
+  /** Оставлено для совместимости: кнопка-шеврон раскрывает набор внутри панели. */
+  onMore?: () => void;
+  /** Экранные координаты сообщения — панель всплывает над ним. */
   anchor?: BubbleFrame | null;
+  /** Своё сообщение: панель прижимается к правому краю пузыря. */
+  mine?: boolean;
 }) {
   const theme = useTheme();
   const reduced = useReducedMotion();
   const { width: screenW, height: screenH } = useWindowDimensions();
-  const cardW = Math.min(360, screenW - 24);
-  const left = anchor
-    ? Math.max(12, Math.min(anchor.x + anchor.width / 2 - cardW / 2, screenW - cardW - 12))
-    : (screenW - cardW) / 2;
-  // Панель над сообщением; если места сверху мало — под ним.
-  const flip = anchor ? anchor.y < 90 : false;
+  const [expanded, setExpanded] = React.useState(false);
+  React.useEffect(() => {
+    if (!visible) setExpanded(false);
+  }, [visible]);
+
+  const cardW = Math.min(expanded ? 372 : 396, screenW - 24);
+  const right = anchor ? anchor.x + anchor.width : screenW - 12;
+  const rawLeft = anchor ? (mine ? right - cardW : anchor.x) : (screenW - cardW) / 2;
+  const left = Math.max(12, Math.min(rawLeft, screenW - cardW - 12));
+  // Панель над сообщением; если сверху мало места — под ним.
+  const flip = anchor ? anchor.y < 80 : false;
   const position = anchor
     ? flip
       ? { top: anchor.y + anchor.height + 8 }
@@ -45,43 +65,58 @@ export function ReactionPicker({
     : { top: screenH / 2 };
 
   if (!visible) return null;
+
+  const fill = theme.dark ? 'rgba(34,34,38,0.62)' : 'rgba(250,250,252,0.78)';
+  const border = theme.dark ? 'rgba(255,255,255,0.10)' : 'rgba(0,0,0,0.06)';
+
   return (
-        <View pointerEvents="box-none" style={StyleSheet.absoluteFill}>
-          <MotiView
-            from={{ opacity: 0, scale: reduced ? 1 : 0.82, translateY: reduced ? 0 : 12 }}
-            animate={{ opacity: 1, scale: 1, translateY: 0 }}
-            transition={reduced ? { type: 'timing', duration: 0 } : motion.spring}
-            style={[
-              styles.card,
-              {
-                backgroundColor: theme.dark ? 'rgba(20,28,42,0.92)' : 'rgba(255,255,255,0.94)',
-                borderColor: theme.glassBorder,
-                position: 'absolute' as const,
-                left,
-                width: cardW,
-                justifyContent: 'center' as const,
-                ...position,
-              },
-              Platform.OS === 'web' ? ({ backdropFilter: 'blur(18px) saturate(1.4)' } as object) : null,
-            ]}
-          >
+    <View pointerEvents="box-none" style={StyleSheet.absoluteFill}>
+      <MotiView
+        from={{ opacity: 0, scale: reduced ? 1 : 0.86, translateY: reduced ? 0 : 10 }}
+        animate={{ opacity: 1, scale: 1, translateY: 0 }}
+        transition={reduced ? { type: 'timing', duration: 0 } : motion.spring}
+        style={[
+          styles.card,
+          expanded ? styles.cardExpanded : null,
+          { borderColor: border, position: 'absolute' as const, left, width: cardW, ...position },
+        ]}
+      >
+        <BlurView
+          intensity={Platform.OS === 'web' ? 0 : 70}
+          tint={theme.dark ? 'dark' : 'light'}
+          style={[StyleSheet.absoluteFill, { backgroundColor: fill }, Platform.OS === 'web' ? ({ backdropFilter: 'blur(36px) saturate(1.7)', WebkitBackdropFilter: 'blur(36px) saturate(1.7)' } as object) : null]}
+          pointerEvents="none"
+        />
+        {expanded ? (
+          <ScrollView style={{ maxHeight: 232 }} showsVerticalScrollIndicator={false} contentContainerStyle={styles.grid}>
+            {MORE_REACTIONS.map((emoji) => (
+              <PressableScale
+                key={emoji}
+                pressedScale={0.86}
+                onPress={() => onPick(emoji)}
+                accessibilityRole="button"
+                accessibilityLabel={`Реакция ${emoji}`}
+                style={styles.gridCell}
+              >
+                <Text style={styles.emoji}>{emoji}</Text>
+              </PressableScale>
+            ))}
+          </ScrollView>
+        ) : (
+          <View style={styles.row}>
             {QUICK_REACTIONS.map((emoji, index) => (
               <MotiView
                 key={emoji}
-                from={{ opacity: 0, scale: reduced ? 1 : 0.7, translateY: reduced ? 0 : 6 }}
+                from={{ opacity: 0, scale: reduced ? 1 : 0.6, translateY: reduced ? 0 : 8 }}
                 animate={{ opacity: 1, scale: 1, translateY: 0 }}
-                transition={
-                  reduced
-                    ? { type: 'timing', duration: 0 }
-                    : { ...motion.spring, delay: index * motion.staggerStepMs }
-                }
+                transition={reduced ? { type: 'timing', duration: 0 } : { ...motion.spring, delay: index * motion.staggerStepMs }}
               >
                 <PressableScale
-                  pressedScale={0.86}
+                  pressedScale={0.84}
                   onPress={() => onPick(emoji)}
                   accessibilityRole="button"
                   accessibilityLabel={`Реакция ${emoji}`}
-                  style={({ pressed }) => [styles.emojiBtn, { backgroundColor: pressed ? theme.accentSoft : 'transparent' }]}
+                  style={styles.emojiBtn}
                 >
                   <Text style={styles.emoji}>{emoji}</Text>
                 </PressableScale>
@@ -89,36 +124,36 @@ export function ReactionPicker({
             ))}
             <PressableScale
               pressedScale={0.9}
-              onPress={onMore}
+              onPress={() => setExpanded(true)}
               accessibilityRole="button"
-              accessibilityLabel="Ещё действия с сообщением"
-              style={({ pressed }) => [styles.moreBtn, { backgroundColor: pressed ? theme.surfacePressed : theme.surface }]}
+              accessibilityLabel="Больше реакций"
+              style={[styles.moreBtn, { backgroundColor: theme.dark ? 'rgba(120,120,128,0.55)' : 'rgba(120,120,128,0.28)' }]}
             >
-              <Text style={{ color: theme.textSecondary, fontSize: 20, fontWeight: '700' }}>⋯</Text>
+              <Ionicons name="chevron-down" size={22} color={theme.dark ? '#FFFFFF' : '#1C1C1E'} />
             </PressableScale>
-          </MotiView>
-        </View>
+          </View>
+        )}
+      </MotiView>
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
-  backdrop: { flex: 1, backgroundColor: 'rgba(0,0,0,0.18)' },
-  center: { flex: 1, alignItems: 'center', justifyContent: 'center' },
   card: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 2,
-    paddingHorizontal: 8,
-    paddingVertical: 6,
     borderRadius: 999,
-    borderWidth: 1,
+    borderWidth: StyleSheet.hairlineWidth,
+    overflow: 'hidden',
     shadowColor: '#000',
-    shadowOpacity: 0.3,
-    shadowRadius: 18,
-    shadowOffset: { width: 0, height: 8 },
-    elevation: 12,
+    shadowOpacity: 0.35,
+    shadowRadius: 22,
+    shadowOffset: { width: 0, height: 10 },
+    elevation: 14,
   },
-  emojiBtn: { width: 46, height: 46, borderRadius: 999, alignItems: 'center', justifyContent: 'center' },
-  emoji: { fontSize: 26 },
-  moreBtn: { width: 40, height: 40, borderRadius: 999, alignItems: 'center', justifyContent: 'center', marginLeft: 2 },
+  cardExpanded: { borderRadius: 26 },
+  row: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 10, paddingVertical: 8 },
+  grid: { flexDirection: 'row', flexWrap: 'wrap', padding: 10 },
+  gridCell: { width: '12.5%', height: 44, alignItems: 'center', justifyContent: 'center' },
+  emojiBtn: { width: 40, height: 44, alignItems: 'center', justifyContent: 'center' },
+  emoji: { fontSize: 28 },
+  moreBtn: { width: 36, height: 36, borderRadius: 18, alignItems: 'center', justifyContent: 'center' },
 });

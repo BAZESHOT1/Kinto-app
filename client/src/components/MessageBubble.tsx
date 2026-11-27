@@ -355,11 +355,11 @@ export function MessageBubble({
 
   // Анимация въезда только у только что пришедших/отправленных: история и прокрутка без дёрганья.
   const fresh = React.useMemo(() => Date.now() - new Date(item.createdAt).getTime() < 5000, [item.createdAt]);
-  const glassBubbles = theme.dark && theme.glassUi !== false;
+  const glassBubbles = theme.dark;
   const onMine = glassBubbles ? '#FFFFFF' : theme.onAccent;
   const mineSub = glassBubbles ? 'rgba(255,255,255,0.62)' : 'rgba(26,18,6,0.68)';
   // Тёмная тема: полупрозрачные «стеклянные» пузыри поверх фона чата (как на макете).
-  const bubbleColor = theme.dark && theme.glassUi !== false
+  const bubbleColor = theme.dark
     ? item.mine
       ? 'rgba(255,255,255,0.12)'
       : 'rgba(10,10,12,0.90)'

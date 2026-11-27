@@ -1,30 +1,41 @@
 import React from 'react';
-import { Platform, Pressable, ScrollView, StyleSheet, Text, View, useWindowDimensions } from 'react-native';
+import { Platform, Pressable, StyleSheet, Text, View, useWindowDimensions } from 'react-native';
+import { BlurView } from 'expo-blur';
 import { Ionicons } from '@expo/vector-icons';
 import * as Haptics from 'expo-haptics';
 import { MotiView } from 'moti';
 import { useTheme } from '../../theme/useTheme';
 import type { ViewMessage } from '../../data/messaging';
 
-const QUICK_REACTIONS = ['👍', '❤️', '😂', '😮', '😢', '🔥'];
+const hhmm = (d: Date) => d.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' });
 
-const fmtTime = (iso: string) => {
+/** «сегодня в 21:39», «вчера в 21:39», «12 ноября в 21:39». */
+export function formatSentAt(iso: string): string {
   try {
-    return new Date(iso).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' });
+    const d = new Date(iso);
+    if (Number.isNaN(d.getTime())) return '';
+    const now = new Date();
+    const startOf = (x: Date) => new Date(x.getFullYear(), x.getMonth(), x.getDate()).getTime();
+    const days = Math.round((startOf(now) - startOf(d)) / 86_400_000);
+    if (days === 0) return `сегодня в ${hhmm(d)}`;
+    if (days === 1) return `вчера в ${hhmm(d)}`;
+    return `${d.toLocaleDateString('ru-RU', { day: 'numeric', month: 'long' })} в ${hhmm(d)}`;
   } catch {
     return '';
   }
-};
+}
+
+const ROW_H = 52;
+const HEADER_H = 54;
 
 /**
- * Меню долгого нажатия на сообщение: быстрые реакции, повтор отправки и действия.
- * Открывается снизу как лист, закрывается тапом по фону; на мобильных даёт тактильный отклик.
+ * Меню действий по долгому нажатию — в стиле Telegram: стеклянная карточка под сообщением
+ * с временем отправки сверху и крупными пунктами (иконка слева). Реакции живут в ReactionPicker.
  */
 export function MessageActionSheet({
   message,
   pinned,
   onClose,
-  onReact,
   onReply,
   onCopy,
   onEdit,
@@ -37,7 +48,6 @@ export function MessageActionSheet({
   message: ViewMessage | null;
   pinned: boolean;
   onClose: () => void;
-  onReact: (emoji: string) => void;
   onReply: () => void;
   onCopy: () => void;
   onEdit: () => void;
@@ -45,7 +55,7 @@ export function MessageActionSheet({
   onPin: () => void;
   /** Повторить отправку несостоявшегося сообщения. */
   onRetry?: () => void;
-  /** Секретный чат: копирование/пересылка запрещены. */
+  /** Секретный чат: копирование запрещено. */
   allowCopy?: boolean;
   /** Экранные координаты сообщения — меню раскрывается под ним. */
   anchor?: { x: number; y: number; width: number; height: number } | null;
@@ -53,14 +63,7 @@ export function MessageActionSheet({
   const theme = useTheme();
   const open = Boolean(message);
   const { width: screenW, height: screenH } = useWindowDimensions();
-  const cardW = Math.min(520, screenW - 24);
-  const top = anchor ? Math.min(anchor.y + anchor.height + 8, screenH * 0.55) : screenH * 0.35;
-  const left = anchor
-    ? Math.max(12, Math.min(anchor.x + anchor.width / 2 - cardW / 2, screenW - cardW - 12))
-    : (screenW - cardW) / 2;
-  const maxCardH = Math.max(160, screenH - top - 24);
 
-  // Тактильный отклик при открытии меню (на web — no-op).
   React.useEffect(() => {
     if (!open || Platform.OS === 'web') return;
     void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => undefined);
@@ -69,176 +72,103 @@ export function MessageActionSheet({
   const failed = Boolean(message?.failed);
   const canRetry = Boolean(onRetry) && failed && Boolean(message?.mine);
   const canEdit = Boolean(message?.mine) && message?.kind === 'text' && !failed && Boolean(message?.id);
-  const preview = message
-    ? message.kind === 'media'
-      ? 'Вложение'
-      : message.text || 'Зашифрованное сообщение'
-    : '';
-  const icon: keyof typeof Ionicons.glyphMap = message?.kind === 'media' ? 'image-outline' : 'chatbubble-ellipses-outline';
+  const canCopy = allowCopy && Boolean(message?.text);
 
-  if (!open) return null;
+  type Item = { key: string; icon: keyof typeof Ionicons.glyphMap; label: string; onPress: () => void; danger?: boolean; accent?: boolean };
+  const items: Item[] = [];
+  if (canRetry) items.push({ key: 'retry', icon: 'refresh-circle-outline', label: 'Повторить отправку', onPress: onRetry!, accent: true });
+  items.push({ key: 'reply', icon: 'arrow-undo-outline', label: 'Ответить', onPress: onReply });
+  if (canCopy) items.push({ key: 'copy', icon: 'copy-outline', label: 'Скопировать', onPress: onCopy });
+  if (canEdit) items.push({ key: 'edit', icon: 'create-outline', label: 'Изменить', onPress: onEdit });
+  if (canEdit) items.push({ key: 'pin', icon: pinned ? 'pin-outline' : 'pin', label: pinned ? 'Открепить' : 'Закрепить', onPress: onPin });
+  items.push({
+    key: 'delete',
+    icon: message?.pending || failed ? 'close-circle-outline' : 'trash-outline',
+    label: message?.pending || failed ? 'Убрать сообщение' : 'Удалить',
+    onPress: onDelete,
+    danger: true,
+  });
+
+  const cardW = Math.min(276, screenW - 24);
+  const cardH = HEADER_H + items.length * ROW_H + 12;
+  const mine = Boolean(message?.mine);
+  const rawLeft = anchor ? (mine ? anchor.x + anchor.width - cardW : anchor.x) : (screenW - cardW) / 2;
+  const left = Math.max(12, Math.min(rawLeft, screenW - cardW - 12));
+  let top = anchor ? anchor.y + anchor.height + 10 : screenH * 0.35;
+  // Не помещается снизу — поднимаем меню, чтобы оно целиком было на экране.
+  if (top + cardH > screenH - 12) top = Math.max(12, screenH - cardH - 12);
+
+  if (!open || !message) return null;
+
+  const fill = theme.dark ? 'rgba(34,34,38,0.66)' : 'rgba(250,250,252,0.82)';
+  const border = theme.dark ? 'rgba(255,255,255,0.10)' : 'rgba(0,0,0,0.06)';
+  const divider = theme.dark ? 'rgba(255,255,255,0.12)' : 'rgba(0,0,0,0.10)';
+  const text = theme.dark ? '#FFFFFF' : '#111114';
+  const sub = theme.dark ? 'rgba(235,235,245,0.62)' : 'rgba(60,60,67,0.6)';
+
   return (
-      <View style={styles.root}>
-        {message ? (
-          <MotiView
-            from={{ opacity: 0, translateY: 36, scale: 0.98 }}
-            animate={{ opacity: 1, translateY: 0, scale: 1 }}
-            transition={{ type: 'spring', damping: 25, stiffness: 320 }}
-            style={[
-              styles.sheet,
-              {
-                backgroundColor: theme.surfaceElevated,
-                borderColor: theme.line,
-                ...theme.shadow,
-                position: 'absolute' as const,
-                left,
-                top,
-                width: cardW,
-                maxHeight: maxCardH,
-                borderRadius: 20,
-                overflow: 'hidden' as const,
-              },
-            ]}
+    <View pointerEvents="box-none" style={styles.root}>
+      <MotiView
+        from={{ opacity: 0, scale: 0.88, translateY: -8 }}
+        animate={{ opacity: 1, scale: 1, translateY: 0 }}
+        transition={{ type: 'spring', damping: 22, stiffness: 320 }}
+        style={[styles.card, { borderColor: border, position: 'absolute' as const, left, top, width: cardW }]}
+      >
+        <BlurView
+          intensity={Platform.OS === 'web' ? 0 : 80}
+          tint={theme.dark ? 'dark' : 'light'}
+          style={[StyleSheet.absoluteFill, { backgroundColor: fill }, Platform.OS === 'web' ? ({ backdropFilter: 'blur(40px) saturate(1.8)', WebkitBackdropFilter: 'blur(40px) saturate(1.8)' } as object) : null]}
+          pointerEvents="none"
+        />
+        {/* Заголовок: статус и время отправки. */}
+        <View style={[styles.header, { borderBottomColor: divider }]}>
+          <Ionicons
+            name={failed ? 'alert-circle' : message.pending ? 'time-outline' : message.mine ? 'checkmark-done' : 'time-outline'}
+            size={20}
+            color={failed ? theme.danger : sub}
+          />
+          <Text numberOfLines={1} style={{ color: text, fontSize: 15.5, flex: 1 }}>
+            {failed ? 'Не отправлено' : message.pending ? 'Отправляется…' : formatSentAt(message.createdAt)}
+          </Text>
+        </View>
+        {items.map((it) => (
+          <Pressable
+            key={it.key}
+            onPress={it.onPress}
+            accessibilityRole="button"
+            accessibilityLabel={it.label}
+            style={({ pressed }) => [styles.row, { backgroundColor: pressed ? (theme.dark ? 'rgba(255,255,255,0.10)' : 'rgba(0,0,0,0.06)') : 'transparent' }]}
           >
-          <ScrollView
-            showsVerticalScrollIndicator={false}
-            keyboardShouldPersistTaps="handled"
-            style={{ maxHeight: maxCardH }}
-            contentContainerStyle={{ paddingBottom: 10 }}
-          >
-            <View style={styles.grabber}>
-              <View style={{ width: 38, height: 4, borderRadius: 2, backgroundColor: theme.line }} />
-            </View>
-
-            {/* Превью сообщения: иконка, автор, время и текст. */}
-            <View style={[styles.preview, { backgroundColor: theme.surface, borderColor: theme.line }]}>
-              <Ionicons name={icon} size={16} color={theme.textSecondary} />
-              <View style={{ flex: 1, minWidth: 0 }}>
-                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-                  <Text numberOfLines={1} style={{ color: theme.textPrimary, fontSize: 12.5, fontWeight: '800', flexShrink: 1 }}>
-                    {message.mine ? 'Вы' : message.senderUsername}
-                  </Text>
-                  <Text style={{ color: theme.textSecondary, fontSize: 11 }}>{fmtTime(message.createdAt)}</Text>
-                  {failed ? <Ionicons name="alert-circle" size={12} color={theme.danger} /> : null}
-                </View>
-                <Text numberOfLines={2} style={{ color: theme.textSecondary, fontSize: 12.5, marginTop: 1 }}>
-                  {preview}
-                </Text>
-              </View>
-            </View>
-
-            <View style={[styles.reactions, { borderColor: theme.line }]}>
-              {QUICK_REACTIONS.map((emoji) => (
-                <MotiView
-                  key={emoji}
-                  from={{ scale: 0.85 }}
-                  animate={{ scale: 1 }}
-                  transition={{ type: 'spring', damping: 16, stiffness: 340 }}
-                >
-                  <Pressable
-                    onPress={() => onReact(emoji)}
-                    accessibilityRole="button"
-                    accessibilityLabel={`Реакция ${emoji}`}
-                    style={({ pressed }) => [styles.reactionBtn, { backgroundColor: pressed ? theme.accentSoft : theme.surface }]}
-                  >
-                    <Text style={{ fontSize: 21 }}>{emoji}</Text>
-                  </Pressable>
-                </MotiView>
-              ))}
-            </View>
-
-            {canRetry ? (
-              <Action icon="refresh-circle-outline" label="Повторить отправку" accent onPress={onRetry!} />
-            ) : null}
-            <Action icon="arrow-undo-outline" label="Ответить" onPress={onReply} />
-            {allowCopy && message.text ? <Action icon="copy-outline" label="Копировать" onPress={onCopy} /> : null}
-            {canEdit ? <Action icon="create-outline" label="Изменить" onPress={onEdit} /> : null}
-            {canEdit ? (
-              <Action icon={pinned ? 'pin-outline' : 'pin'} label={pinned ? 'Открепить' : 'Закрепить'} onPress={onPin} />
-            ) : null}
-            <Action
-              icon={message.pending || failed ? 'close-circle-outline' : 'trash-outline'}
-              label={message.pending || failed ? 'Убрать сообщение' : 'Удалить'}
-              danger
-              onPress={onDelete}
-            />
-          </ScrollView>
-          </MotiView>
-        ) : null}
-      </View>
-  );
-}
-
-function Action({
-  icon,
-  label,
-  onPress,
-  danger,
-  accent,
-}: {
-  icon: keyof typeof Ionicons.glyphMap;
-  label: string;
-  onPress: () => void;
-  danger?: boolean;
-  accent?: boolean;
-}) {
-  const theme = useTheme();
-  const color = danger ? theme.danger : accent ? theme.accent : theme.textPrimary;
-  return (
-    <Pressable
-      onPress={onPress}
-      accessibilityRole="button"
-      accessibilityLabel={label}
-      style={({ pressed }) => [styles.action, { backgroundColor: pressed ? (danger ? theme.dangerSoft : theme.surfacePressed) : 'transparent' }]}
-    >
-      <Ionicons name={icon} size={18} color={danger ? theme.danger : accent ? theme.accent : theme.textSecondary} />
-      <Text style={{ color, fontSize: 15, flex: 1 }}>{label}</Text>
-    </Pressable>
+            <Ionicons name={it.icon} size={24} color={it.danger ? '#FF5A4F' : it.accent ? theme.accent : text} />
+            <Text style={{ color: it.danger ? '#FF5A4F' : it.accent ? theme.accent : text, fontSize: 17, flex: 1 }}>{it.label}</Text>
+          </Pressable>
+        ))}
+      </MotiView>
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
-  root: { flex: 1 },
-  sheet: {
-    width: '100%',
-    maxWidth: 520,
-    borderTopLeftRadius: 20,
-    borderTopRightRadius: 20,
-    borderWidth: 1,
-    borderBottomWidth: 0,
-    paddingHorizontal: 12,
-    paddingBottom: 18,
-    paddingTop: 8,
-    gap: 6,
+  root: { ...StyleSheet.absoluteFillObject },
+  card: {
+    borderRadius: 26,
+    borderWidth: StyleSheet.hairlineWidth,
+    overflow: 'hidden',
+    shadowColor: '#000',
+    shadowOpacity: 0.35,
+    shadowRadius: 24,
+    shadowOffset: { width: 0, height: 12 },
+    elevation: 16,
+    paddingBottom: 6,
   },
-  grabber: { alignItems: 'center', paddingVertical: 6 },
-  preview: {
+  header: {
+    height: HEADER_H,
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 9,
-    borderWidth: 1,
-    borderRadius: 12,
-    paddingHorizontal: 10,
-    paddingVertical: 8,
-    marginBottom: 2,
+    gap: 14,
+    paddingHorizontal: 20,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    marginBottom: 4,
   },
-  reactions: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    gap: 6,
-    borderTopWidth: 1,
-    borderBottomWidth: 1,
-    paddingVertical: 8,
-    marginVertical: 4,
-  },
-  reactionBtn: { width: 44, height: 44, borderRadius: 22, alignItems: 'center', justifyContent: 'center' },
-  action: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
-    paddingVertical: 11,
-    paddingHorizontal: 8,
-    borderRadius: 10,
-    minHeight: 44,
-  },
+  row: { height: ROW_H, flexDirection: 'row', alignItems: 'center', gap: 14, paddingHorizontal: 20 },
 });

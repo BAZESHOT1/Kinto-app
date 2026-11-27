@@ -419,7 +419,6 @@ export interface User {
   bioVisibility?: BioVisibility;
   /* ---- синхронизируемые настройки интерфейса ---- */
   themeName?: string;
-  uiStyle?: 'glass' | 'flat';
   accentName?: string;
   locale?: string;
   mutedChats?: string[];
@@ -1109,7 +1108,6 @@ export const api = {
           lastSeenVisibility?: LastSeenVisibility;
           bioVisibility?: BioVisibility;
           themeName?: string;
-  uiStyle?: 'glass' | 'flat';
           accentName?: string;
           locale?: string;
           mutedChats?: string[];

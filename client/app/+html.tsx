@@ -9,7 +9,8 @@ export default function Root({ children }: PropsWithChildren) {
         <meta charSet="utf-8" />
         <meta httpEquiv="X-UA-Compatible" content="IE=edge" />
         <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
-        <meta name="theme-color" content="#0A0E14" />
+        <meta name="theme-color" content="#000000" />
+        <meta name="color-scheme" content="dark light" />
         <meta
           name="description"
           content="Kinto — приватный мессенджер на рое узлов: чаты, каналы, секретные диалоги и свои устройства хранения."
@@ -29,7 +30,7 @@ export default function Root({ children }: PropsWithChildren) {
         <style
           id="bg-root"
           dangerouslySetInnerHTML={{
-            __html: `html,body{margin:0;height:100%;box-sizing:border-box;overflow:hidden;overscroll-behavior:none}html{background:#0A0E14}body{position:fixed;top:0;left:0;right:0;bottom:0;width:100%;padding:env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);background:#0A0E14;color:#E8F0FA;color-scheme:dark;-webkit-text-size-adjust:100%;text-size-adjust:100%;touch-action:manipulation}#root{display:flex;height:100%;width:100%;box-sizing:border-box;margin:0}#scaling-root{display:none}*,*::before,*::after{-webkit-tap-highlight-color:transparent}*{scrollbar-width:none}*::-webkit-scrollbar{width:0;height:0;display:none}@media (max-width:900px),(pointer:coarse){input,textarea,select{font-size:16px !important}}`,
+            __html: `html,body{margin:0;height:100%;box-sizing:border-box;overflow:hidden;overscroll-behavior:none}html{background:#000;color-scheme:dark}body{position:fixed;top:0;left:0;right:0;bottom:0;width:100%;padding:env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);background:#000;color:#E8F0FA;-webkit-text-size-adjust:100%;text-size-adjust:100%;touch-action:manipulation}#root{display:flex;height:100%;width:100%;box-sizing:border-box;margin:0}#scaling-root{display:none}*,*::before,*::after{-webkit-tap-highlight-color:transparent}*{scrollbar-width:none}*::-webkit-scrollbar{width:0;height:0;display:none}@media (max-width:900px),(pointer:coarse){input,textarea,select{font-size:16px !important}}`,
           }}
         />
       </head>

@@ -1049,7 +1049,7 @@ function BrightProfile({
   // Safe-area уже применена оболочкой — здесь только зазор контента.
   // Профиль full-bleed (ScrollView сдвинут на -paddingTop оболочки): возвращаем этот отступ,
   // чтобы кнопки и аватарка не оказывались под статус-баром / вырезом.
-  const topPad = desktop ? 0 : shellTop + 2;
+  const topPad = desktop ? shellTop : shellTop + 2;
   const badges = buildProfileBadges(badgeFacts, theme);
   const [badgesOpen, setBadgesOpen] = React.useState(false);
 
@@ -1339,8 +1339,8 @@ function BrightProfile({
 
   return (
     <View style={styles.bPage}>
-      <View style={[styles.bInner, desktop ? styles.bInnerDesktop : { paddingTop: topPad }]}>
-        <View style={[styles.pTopBar, { top: desktop ? 6 : topPad }]}>
+      <View style={[styles.bInner, desktop ? [styles.bInnerDesktop, { paddingTop: 56 + shellTop }] : { paddingTop: topPad }]}>
+        <View style={[styles.pTopBar, { top: desktop ? shellTop + 6 : topPad }]}>
           <PressableScale onPress={onBack} accessibilityRole="button" accessibilityLabel="Назад" hitSlop={10}>
             <Glass radius={26} fill={glassFill} style={styles.pRound}>
               <Ionicons name="chevron-back" size={24} color={theme.textPrimary} />

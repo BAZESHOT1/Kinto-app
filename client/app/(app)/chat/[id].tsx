@@ -2328,14 +2328,7 @@ function ChatScreen({ forcedId }: { forcedId?: string } = {}) {
           animationType="none"
           onRequestClose={closeHoldMenu}
         >
-          <Pressable style={StyleSheet.absoluteFill} onPress={closeHoldMenu} accessibilityRole="button" accessibilityLabel="Закрыть меню сообщения">
-            <BlurView
-              intensity={40}
-              tint={theme.dark ? 'dark' : 'light'}
-              style={StyleSheet.absoluteFill}
-              pointerEvents="none"
-            />
-          </Pressable>
+          <HoldBackdrop anchor={menuAnchor} dark={theme.dark} onClose={closeHoldMenu} />
           <ReactionPicker
             visible={Boolean(reactionTarget)}
             anchor={menuAnchor}
@@ -2344,7 +2337,7 @@ function ChatScreen({ forcedId }: { forcedId?: string } = {}) {
               if (reactionTarget) void reactTo(reactionTarget, emoji);
               closeHoldMenu();
             }}
-            onMore={closeHoldMenu}
+            mine={Boolean((reactionTarget ?? sheetMessage)?.mine)}
           />
 
         <MessageActionSheet
@@ -2352,7 +2345,6 @@ function ChatScreen({ forcedId }: { forcedId?: string } = {}) {
           anchor={menuAnchor}
           pinned={Boolean(sheetMessage && pinned?.id === sheetMessage.id)}
           allowCopy={true}
-          onReact={(emoji) => { if (sheetMessage) void reactTo(sheetMessage, emoji); closeHoldMenu(); }}
           onReply={() => { if (sheetMessage) startReply(sheetMessage); closeHoldMenu(); }}
           onCopy={() => { if (sheetMessage) void copyMessageText(sheetMessage.text ?? ''); closeHoldMenu(); }}
           onEdit={() => { if (sheetMessage) startEdit(sheetMessage); closeHoldMenu(); }}
@@ -2428,6 +2420,41 @@ function ChatScreen({ forcedId }: { forcedId?: string } = {}) {
         </Pressable>
       </Modal>
     </Avoider>
+  );
+}
+
+/**
+ * Фон меню сообщения: размытие + затемнение всего экрана, кроме «окна» вокруг самого сообщения
+ * (оно остаётся чётким, как в Telegram). Четыре полосы вокруг якоря; тап по любой — закрыть.
+ */
+function HoldBackdrop({ anchor, dark, onClose }: { anchor: { x: number; y: number; width: number; height: number } | null; dark: boolean; onClose: () => void }) {
+  const { width: W, height: H } = useWindowDimensions();
+  const pad = 4;
+  const a = anchor
+    ? { x: Math.max(0, anchor.x - pad), y: Math.max(0, anchor.y - pad), w: Math.min(W, anchor.width + pad * 2), h: anchor.height + pad * 2 }
+    : { x: 0, y: 0, w: 0, h: 0 };
+  const strips = [
+    { left: 0, top: 0, width: W, height: a.y },
+    { left: 0, top: a.y + a.h, width: W, height: Math.max(0, H - a.y - a.h) },
+    { left: 0, top: a.y, width: a.x, height: a.h },
+    { left: a.x + a.w, top: a.y, width: Math.max(0, W - a.x - a.w), height: a.h },
+  ];
+  const list = anchor ? strips : [{ left: 0, top: 0, width: W, height: H }];
+  return (
+    <>
+      {list.map((r, i) => (
+        <Pressable
+          key={i}
+          onPress={onClose}
+          accessibilityRole="button"
+          accessibilityLabel="Закрыть меню сообщения"
+          style={{ position: 'absolute', left: r.left, top: r.top, width: r.width, height: r.height }}
+        >
+          <BlurView intensity={45} tint={dark ? 'dark' : 'light'} style={StyleSheet.absoluteFill} pointerEvents="none" />
+          <View pointerEvents="none" style={[StyleSheet.absoluteFill, { backgroundColor: dark ? 'rgba(0,0,0,0.38)' : 'rgba(255,255,255,0.30)' }]} />
+        </Pressable>
+      ))}
+    </>
   );
 }
 
