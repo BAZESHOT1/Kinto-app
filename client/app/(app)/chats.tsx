@@ -2170,8 +2170,8 @@ const SearchField = React.forwardRef<
     >
       {expanded ? <Ionicons name="search" size={18} color="#636366" /> : null}
       {!expanded && !value ? (
-        <View pointerEvents="none" style={StyleSheet.absoluteFillObject}>
-          <Text style={{ textAlign: 'center', textAlignVertical: 'center', color: '#8E8E93', fontSize: 15 }}>
+        <View pointerEvents="none" style={[StyleSheet.absoluteFillObject, { alignItems: 'center', justifyContent: 'center' }]}>
+          <Text style={{ textAlign: 'center', color: '#8E8E93', fontSize: 15 }}>
             {placeholder}
           </Text>
         </View>

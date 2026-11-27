@@ -34,9 +34,10 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const wide = useIsWide();
   const theme = useTheme();
 
-  const paddingLeft = wide ? (insets.left || 0) + SIDEBAR_WIDTH + spacing.md : SCREEN_X;
+  const paddingLeft = wide ? (insets.left || 0) + SIDEBAR_WIDTH + 24 : SCREEN_X;
   const paddingRight = wide ? WIDE_RIGHT_X : SCREEN_X;
-  const paddingTop = insets.top;
+  // Верхний отступ: на широком вебе фиксированные 24, на мобильном — safe-area (0 на вебе, там CSS env()) + 12.
+  const paddingTop = (insets.top || 12) + 12;
 
   const metrics = React.useMemo<ShellMetrics>(
     () => ({ insets, wide, paddingLeft, paddingRight, paddingTop }),
