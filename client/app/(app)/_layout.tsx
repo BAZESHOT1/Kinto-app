@@ -21,7 +21,17 @@ export default function AppLayout() {
 
   useEffect(() => {
     if (!ready || !pathname) return;
-    if (!session) router.replace('/login' as never);
+    if (session) return undefined;
+    // Прямая ссылка без входа: корневой layout ещё не смонтирован — откладываем переход,
+    // иначе expo-router бросает «Attempted to navigate before mounting the Root Layout».
+    const timer = setTimeout(() => {
+      try {
+        router.replace('/login' as never);
+      } catch {
+        /* повторим при следующем изменении pathname/session */
+      }
+    }, 50);
+    return () => clearTimeout(timer);
   }, [pathname, ready, session, router]);
 
   if (!ready || !session) {
