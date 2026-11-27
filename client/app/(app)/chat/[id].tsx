@@ -1913,7 +1913,8 @@ function ChatScreen({ forcedId }: { forcedId?: string } = {}) {
           // Full-bleed: компенсируем ровно те значения, которые задала
           // оболочка — без магических чисел и без привязки к pathname.
           marginTop: -shell.paddingTop,
-          marginLeft: -shell.paddingLeft,
+          // На широком экране диалог остаётся правее боковой панели (12 px зазор), а не уходит под неё.
+          marginLeft: shell.wide ? -12 : -shell.paddingLeft,
           marginRight: -shell.paddingRight,
           // Акцентная рамка вокруг экрана секретного чата.
           borderWidth: secret ? 1.5 : 0,

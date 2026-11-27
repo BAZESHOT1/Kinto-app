@@ -356,12 +356,11 @@ export default function UserProfileScreen() {
       {/* Фон профиля неподвижен и занимает весь экран; без своего фото — прозрачный. */}
       <Wallpaper image={profile.background ?? null} bleed />
       <ScrollView
+        // Full-bleed: сдвигаем сам ScrollView (а не контент — тот обрезался бы его границей).
+        style={{ marginTop: -shell.paddingTop }}
         contentContainerStyle={{
           flexGrow: 1,
           paddingBottom: CONTENT_BOTTOM_PAD,
-          // Компенсируем постоянный отступ AppShell: профиль сам задаёт
-          // Full-bleed: компенсируем ровно отступ оболочки.
-          marginTop: -shell.paddingTop,
         }}
         showsVerticalScrollIndicator={false}
         refreshControl={
@@ -1046,8 +1045,11 @@ function BrightProfile({
   const reduced = useReducedMotion();
   const { width } = useWindowDimensions();
   const desktop = width >= 900 && !forceMobile;
+  const shellTop = useShellMetrics().paddingTop;
   // Safe-area уже применена оболочкой — здесь только зазор контента.
-  const topPad = desktop ? 0 : 14;
+  // Профиль full-bleed (ScrollView сдвинут на -paddingTop оболочки): возвращаем этот отступ,
+  // чтобы кнопки и аватарка не оказывались под статус-баром / вырезом.
+  const topPad = desktop ? 0 : shellTop + 2;
   const badges = buildProfileBadges(badgeFacts, theme);
   const [badgesOpen, setBadgesOpen] = React.useState(false);
 

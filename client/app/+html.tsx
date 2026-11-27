@@ -29,11 +29,19 @@ export default function Root({ children }: PropsWithChildren) {
         <style
           id="bg-root"
           dangerouslySetInnerHTML={{
-            __html: `html,body,#root{margin:0;height:100%;height:100dvh;box-sizing:border-box}html{background:#0A0E14}body{overflow:hidden;padding:env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);background:#0A0E14;color:#E8F0FA;color-scheme:dark;-webkit-text-size-adjust:100%;text-size-adjust:100%;touch-action:manipulation}#root{display:flex}#scaling-root{display:none}*,*::before,*::after{-webkit-tap-highlight-color:transparent}*{scrollbar-width:none}*::-webkit-scrollbar{width:0;height:0;display:none}@media (max-width:900px),(pointer:coarse){input,textarea,select{font-size:16px !important}}`,
+            __html: `html,body{margin:0;height:100%;box-sizing:border-box;overflow:hidden;overscroll-behavior:none}html{background:#0A0E14}body{position:fixed;top:0;left:0;right:0;bottom:0;width:100%;padding:env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);background:#0A0E14;color:#E8F0FA;color-scheme:dark;-webkit-text-size-adjust:100%;text-size-adjust:100%;touch-action:manipulation}#root{display:flex;height:100%;width:100%;box-sizing:border-box;margin:0}#scaling-root{display:none}*,*::before,*::after{-webkit-tap-highlight-color:transparent}*{scrollbar-width:none}*::-webkit-scrollbar{width:0;height:0;display:none}@media (max-width:900px),(pointer:coarse){input,textarea,select{font-size:16px !important}}`,
           }}
         />
       </head>
-      <body>{children}</body>
+      <body>
+        {children}
+        {/* Документ не должен прокручиваться сам (фокус поля, клавиатура): сбрасываем сдвиг. */}
+        <script
+          dangerouslySetInnerHTML={{
+            __html: `(function(){var r=function(){if(window.scrollX||window.scrollY)window.scrollTo(0,0);var d=document.documentElement,b=document.body;if(d.scrollTop)d.scrollTop=0;if(b.scrollTop)b.scrollTop=0};window.addEventListener('scroll',r,{passive:true});window.addEventListener('resize',r);document.addEventListener('focusout',function(){setTimeout(r,60)});if(window.visualViewport)window.visualViewport.addEventListener('resize',r)})();`,
+          }}
+        />
+      </body>
     </html>
   );
 }
