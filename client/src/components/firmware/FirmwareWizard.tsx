@@ -304,6 +304,12 @@ export function FirmwareWizard() {
           setBuildError('');
           setBuild((prev) => ({ ...(prev ?? { id: build.id, status: 'queued' }), ...detail }));
           if (isTerminalStatus(detail.status)) {
+            if (detail.status === 'failed') {
+              // Причина сборки должна быть видна и в консоли, и в интерфейсе, а не пропадать молча.
+              const reason = (detail as { log?: string }).log?.trim() || `Сборщик вернул failed (${detail.phase ?? 'неизвестная фаза'}) без лога`;
+              console.warn('[fw] build failed', build.id, detail.phase, reason);
+              setBuildError(reason.slice(0, 1200));
+            }
             setPollActive(false);
             setHistoryToken((value) => value + 1);
             return;
