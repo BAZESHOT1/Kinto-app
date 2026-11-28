@@ -6,7 +6,7 @@
  */
 import type { FeedEntry, HistoryEntry, SearchResult } from './protocol';
 
-export { emitKmeshAudio, onKmeshAudio } from './audioEvents';
+export { emitKmeshAudio, onKmeshAudio, emitKmeshDataPayload, onKmeshDataPayload } from './audioEvents';
 
 
 type SearchEvent = { reqId: number; results: SearchResult[]; more: boolean };

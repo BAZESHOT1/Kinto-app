@@ -130,7 +130,7 @@ bool HttpGatewayTransport::publish(const char *topic, const uint8_t *data, size_
 }
 
 bool HttpGatewayTransport::poll_downlink(uint32_t now_ms) {
-  if (now_ms - last_poll_ms_ < KL_GATEWAY_POLL_MS) return false;
+  if (now_ms - last_poll_ms_ < poll_interval_ms_) return false;
   last_poll_ms_ = now_ms;
   String url = String(base_) + "/v1/kmesh/v1/downlink?gateway_id=" +
                String((unsigned long)cfg_.gateway_id) + "&since=" + String((unsigned long)cursor_);
@@ -157,6 +157,13 @@ bool HttpGatewayTransport::poll_downlink(uint32_t now_ms) {
   parse_pos_ = 0;
   uint32_t next_cursor = cursor_;
   if (json_uint(body_, body_ + body_len_, "cursor", &next_cursor)) cursor_ = next_cursor;
+  /* Hub просит опрашивать чаще (голос звонка): 250..5000 мс; без поля — стандартные 1.8 с. */
+  uint32_t poll_ms = 0;
+  if (json_uint(body_, body_ + body_len_, "poll_ms", &poll_ms) && poll_ms >= 250 && poll_ms <= 5000) {
+    poll_interval_ms_ = poll_ms;
+  } else {
+    poll_interval_ms_ = KL_GATEWAY_POLL_MS;
+  }
   return true;
 }
 

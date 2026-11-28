@@ -14,6 +14,7 @@ import { api } from '../../../../src/data/api';
 import { Avatar } from '../../../../src/components/Avatar';
 import { useStore } from '../../../../src/state/useStore';
 import { useCallStore } from '../../../../src/call/callStore';
+import { startMeshVoice, type MeshVoiceHandle } from '../../../../src/call/meshVoice';
 import { supportsSpeakerToggle } from '../../../../src/call/audioSession';
 import {
   joinCallRoom,
@@ -35,7 +36,8 @@ const ERRORS: Record<string, string> = {
 const fmt = (sec: number) => `${String(Math.floor(sec / 60)).padStart(2, '0')}:${String(sec % 60).padStart(2, '0')}`;
 
 export default function CallScreen() {
-  const params = useLocalSearchParams<{ id?: string; type?: string; callId?: string; title?: string }>();
+  const params = useLocalSearchParams<{ id?: string; type?: string; callId?: string; title?: string; mesh?: string }>();
+  const meshMode = params.mesh === '1';
   const router = useRouter();
   const theme = useTheme();
   const pushToast = useStore((s) => s.pushToast);
@@ -51,6 +53,7 @@ export default function CallScreen() {
   const [seconds, setSeconds] = React.useState(0);
   const [error, setError] = React.useState('');
   const roomRef = React.useRef<CallRoomHandle | null>(null);
+  const meshRef = React.useRef<MeshVoiceHandle | null>(null);
   const callIdRef = React.useRef('');
   const connectedAtRef = React.useRef(0);
   const closedRef = React.useRef(false);
@@ -65,6 +68,9 @@ export default function CallScreen() {
       const id = callIdRef.current;
       await roomRef.current?.disconnect();
       roomRef.current = null;
+      meshRef.current?.stop();
+      meshRef.current = null;
+      if (id && meshMode) void api.callMeshLeave(id).catch(() => undefined);
       setActiveCallId(null);
       if (id) void api.callEnd(id).catch(() => undefined);
       void endForAll;
@@ -89,6 +95,15 @@ export default function CallScreen() {
         callIdRef.current = res.callId;
         setActiveCallId(res.callId);
         useCallStore.getState().setIncoming(null);
+        if (meshMode) {
+          // E-kMesh: голос идёт Codec2 через модуль, комната LiveKit подключается шлюзом на сервере.
+          const m = await api.callMeshJoin(res.callId);
+          meshRef.current = await startMeshVoice({ callId: res.callId, ...m.mesh });
+          connectedAtRef.current = Date.now();
+          setPhase('connected');
+          setParticipants([{ id: 'me', name: 'Вы', local: true, speaking: false, muted: false, level: 0 }]);
+          return;
+        }
         const room = await joinCallRoom({
           url: res.server.url,
           token: res.token,
@@ -115,7 +130,7 @@ export default function CallScreen() {
         const known = Object.keys(ERRORS).find((k) => code.includes(k));
         console.warn('[call] start failed', code);
         const offline = /network|failed to fetch|timeout|abort|load failed/i.test(code);
-        setError(known ? ERRORS[known] : offline ? 'Нет связи с сервером. Без интернета звонок возможен через E-kMesh при подключённом носимом модуле' : Platform.OS === 'web' && /permission|NotAllowed/i.test(code) ? 'Разрешите доступ к микрофону в браузере' : `Не удалось начать звонок: ${code}`);
+        setError(known ? ERRORS[known] : /mesh_audio_native_unsupported/.test(code) ? 'Голос через E-kMesh на телефонах пока недоступен: используйте интернет или web-клиент' : /no_module_bound/.test(code) ? 'К аккаунту не привязан носимый модуль' : offline ? 'Нет связи с сервером. Без интернета звонок возможен через E-kMesh при подключённом носимом модуле' : Platform.OS === 'web' && /permission|NotAllowed/i.test(code) ? 'Разрешите доступ к микрофону в браузере' : `Не удалось начать звонок: ${code}`);
         setPhase('ended');
         if (callIdRef.current) void api.callEnd(callIdRef.current).catch(() => undefined);
         setActiveCallId(null);
@@ -126,6 +141,7 @@ export default function CallScreen() {
       if (!closedRef.current) {
         closedRef.current = true;
         void roomRef.current?.disconnect();
+        meshRef.current?.stop();
         const id = callIdRef.current;
         setActiveCallId(null);
         if (id) void api.callEnd(id).catch(() => undefined);
@@ -149,6 +165,7 @@ export default function CallScreen() {
     const next = !muted;
     setMuted(next);
     await roomRef.current?.setMuted(next);
+    meshRef.current?.setMuted(next);
   };
   const toggleSpeaker = async () => {
     const next = !speaker;
@@ -170,7 +187,7 @@ export default function CallScreen() {
       <View style={styles.header}>
         <Text style={{ color: theme.textPrimary, fontSize: 22, fontWeight: '800' }} numberOfLines={1}>{title}</Text>
         <Text style={{ color: phase === 'reconnecting' || error ? theme.warning : theme.accent, fontSize: 16, marginTop: 6 }}>{status}</Text>
-        <Text style={{ color: theme.textSecondary, fontSize: 12, marginTop: 4 }}>Интернет · WebRTC · Opus</Text>
+        <Text style={{ color: theme.textSecondary, fontSize: 12, marginTop: 4 }}>{meshMode ? 'E-kMesh · Codec2 3200 бит/с' : 'Интернет · WebRTC · Opus'}</Text>
       </View>
 
       <ScrollView contentContainerStyle={styles.grid} showsVerticalScrollIndicator={false}>

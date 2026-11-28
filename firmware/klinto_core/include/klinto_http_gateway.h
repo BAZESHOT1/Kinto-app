@@ -49,6 +49,8 @@ class HttpGatewayTransport : public IGatewayTransport {
   char key_hex_[65];
   uint32_t cursor_;
   uint32_t last_poll_ms_;
+  /* Интервал опроса downlink: Hub может ускорить его на время звонка (поле poll_ms в ответе). */
+  uint32_t poll_interval_ms_ = 1800;
   char body_[4096];
   size_t body_len_;
   size_t parse_pos_;

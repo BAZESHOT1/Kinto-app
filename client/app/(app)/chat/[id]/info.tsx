@@ -1,7 +1,7 @@
 import { DirectChatResolver, directPeerFromParam } from '../../../../src/components/chat/DirectChatResolver';
 import { safeBack } from '../../../../src/navigation/safeBack';
 import React from 'react';
-import { Modal, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Modal, Platform, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { InviteMembersModal } from '../../../../src/components/chatinfo/InviteMembersModal';
 import { Ionicons } from '@expo/vector-icons';
 import { MotiView } from 'moti';
@@ -627,6 +627,15 @@ function ChatInfoScreen({ forcedId }: { forcedId?: string } = {}) {
               <Text style={{ color: theme.accent, fontWeight: '700' }}>
                 {type === 'direct' ? 'Позвонить' : 'Начать групповой звонок'}
               </Text>
+            </Pressable>
+          ) : null}
+          {canStartCall && Platform.OS === 'web' ? (
+            <Pressable
+              onPress={() => router.push(`/chat/${chatId}/call?type=${type || ''}&mesh=1` as never)}
+              style={{ marginTop: 8, padding: 12, borderRadius: 12, flexDirection: 'row', alignItems: 'center', gap: 10, borderWidth: 1, borderColor: theme.line }}
+            >
+              <Ionicons name="radio" size={18} color={theme.textSecondary} />
+              <Text style={{ color: theme.textSecondary, fontWeight: '600' }}>Через E-kMesh (Codec2)</Text>
             </Pressable>
           ) : null}
 

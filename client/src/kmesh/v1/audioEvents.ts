@@ -11,3 +11,18 @@ export function onKmeshAudio(listener: (frame: Uint8Array) => void): () => void 
   listeners.add(listener);
   return () => { listeners.delete(listener); };
 }
+
+/** Входящий универсальный DATA_PAYLOAD (kMesh v2): голос звонка и другие прикладные конверты. */
+type DataPayloadListener = (envelope: { scheme: number; flags: number; keyId: number; nonce: Uint8Array; ciphertext: Uint8Array }) => void;
+const dataListeners = new Set<DataPayloadListener>();
+
+export function emitKmeshDataPayload(envelope: Parameters<DataPayloadListener>[0]): void {
+  for (const l of dataListeners) {
+    try { l(envelope); } catch { /* слушатель не должен ломать канал */ }
+  }
+}
+
+export function onKmeshDataPayload(listener: DataPayloadListener): () => void {
+  dataListeners.add(listener);
+  return () => { dataListeners.delete(listener); };
+}

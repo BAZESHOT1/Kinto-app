@@ -4,6 +4,7 @@
  * ModuleProvider создаёт клиент поверх BLE и регистрирует его здесь, чтобы
  * экран чатов мог запросить поиск/ленту через модуль, когда HTTP недоступен.
  */
+import { ANY_GATEWAY_ID } from './protocol';
 import type { KMeshV1Client } from './client';
 
 let active: KMeshV1Client | null = null;
@@ -50,6 +51,16 @@ export async function requestKmeshSearch(query: string, type = 0): Promise<boole
 export async function requestKmeshFeed(lastSyncTs: number): Promise<boolean> {
   if (!active) return false;
   return withRetry((client) => client.syncFeed(lastSyncTs >>> 0));
+}
+
+/**
+ * Универсальный DATA_PAYLOAD (kMesh v2): непрозрачный конверт уходит через модуль и шлюз на Hub.
+ * voice — приоритет голоса: прошивка вытесняет им остальные очереди, содержимое она не читает.
+ */
+export function sendKmeshDataPayload(envelope: Uint8Array, voice = false): boolean {
+  if (!active) return false;
+  void active.sendDataPayload(envelope, ANY_GATEWAY_ID, { voice, toInternet: true }).catch(() => false);
+  return true;
 }
 
 /** Opus-кадр звонка по E-kMesh (только при отсутствии интернета). */
