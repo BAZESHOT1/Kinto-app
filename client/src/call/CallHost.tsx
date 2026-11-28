@@ -15,6 +15,7 @@ import { useCallStore, type CallSession } from './callStore';
 import { startMeshVoice, type MeshVoiceHandle } from './meshVoice';
 import { supportsSpeakerToggle } from './audioSession';
 import { startCallKeepAlive } from './callBackground';
+import { ParticipantSheet } from './ParticipantSheet';
 import { chooseCallChannel, type ChannelChoice } from './meshLinkState';
 import {
   joinCallRoom,
@@ -99,6 +100,18 @@ function ActiveCall({ session }: { session: CallSession }) {
   const [muted, setMuted] = React.useState(false);
   const [speaker, setSpeaker] = React.useState(Platform.OS !== 'web'); // на смартфонах по умолчанию громкая связь; выключение — разговорный динамик
   const [seconds, setSeconds] = React.useState(0);
+  const [selectedId, setSelectedId] = React.useState<string | null>(null);
+  // Администрация группы (владелец / админ / модератор) может мутить участников у всех.
+  const [canModerate, setCanModerate] = React.useState(false);
+  React.useEffect(() => {
+    if (chatType !== 'group' || !chatId) return undefined;
+    let alive = true;
+    void api.getChat(chatId).then((c) => {
+      const role = (c as unknown as { myRole?: string }).myRole;
+      if (alive) setCanModerate(role === 'owner' || role === 'admin' || role === 'moderator');
+    }).catch(() => undefined);
+    return () => { alive = false; };
+  }, [chatId, chatType]);
   const [error, setError] = React.useState('');
   const roomRef = React.useRef<CallRoomHandle | null>(null);
   const meshRef = React.useRef<MeshVoiceHandle | null>(null);
@@ -251,7 +264,7 @@ function ActiveCall({ session }: { session: CallSession }) {
           connectedAtRef.current = Date.now();
           useCallStore.getState().setConnectedAt(connectedAtRef.current);
           setPhase('connected');
-          setParticipants([{ id: 'me', name: 'Вы', local: true, speaking: false, muted: false, level: 0 }]);
+          setParticipants([{ id: 'me', name: 'Вы', local: true, speaking: false, muted: false, level: 0, volume: 1, modMuted: false }]);
           return;
         }
         const room = await joinWith(res.server.url, res.token);
@@ -335,6 +348,15 @@ function ActiveCall({ session }: { session: CallSession }) {
     meshRef.current?.setMuted(next);
   };
   toggleMuteRef.current = toggleMute;
+  const setVolume = (id: string, v: number) => roomRef.current?.setParticipantVolume(id, v);
+  const modMute = (id: string, muted: boolean) => {
+    const op = topicRef.current
+      ? api.topicVoiceModerate(topicRef.current, id, muted)
+      : api.callModerate(callIdRef.current, id, muted);
+    void op.catch(() => undefined);
+    // Состояние придёт от LiveKit (ParticipantPermissionsChanged); показываем сразу.
+    setParticipants((list) => list.map((p) => (p.id === id ? { ...p, modMuted: muted } : p)));
+  };
   const toggleSpeaker = async () => {
     const next = !speaker;
     setSpeaker(next);
@@ -384,7 +406,7 @@ function ActiveCall({ session }: { session: CallSession }) {
 
       <ScrollView contentContainerStyle={styles.grid} showsVerticalScrollIndicator={false}>
         {participants.map((p) => (
-          <View key={p.id} style={styles.cell}>
+          <Pressable key={p.id} onPress={p.local ? undefined : () => setSelectedId(p.id)} disabled={p.local} accessibilityRole="button" accessibilityLabel={`Громкость: ${p.name}`} style={styles.cell}>
             <View
               style={[
                 styles.ring,
@@ -392,18 +414,30 @@ function ActiveCall({ session }: { session: CallSession }) {
               ]}
             >
               <Avatar name={p.name} size={84} />
-              {p.muted ? (
+              {p.muted || p.modMuted ? (
                 <View style={[styles.mutedBadge, { backgroundColor: theme.surfaceElevated }]}>
-                  <Ionicons name="mic-off" size={14} color={theme.textSecondary} />
+                  <Ionicons name="mic-off" size={14} color={p.modMuted ? theme.danger : theme.textSecondary} />
+                </View>
+              ) : null}
+              {!p.local && p.volume !== 1 ? (
+                <View style={[styles.volBadge, { backgroundColor: theme.surfaceElevated }]}>
+                  <Text style={{ color: p.volume === 0 ? theme.danger : theme.textPrimary, fontSize: 10, fontWeight: '800' }}>{Math.round(p.volume * 100)}%</Text>
                 </View>
               ) : null}
             </View>
             <Text style={{ color: theme.textPrimary, marginTop: 8, fontSize: 14 }} numberOfLines={1}>
               {p.local ? 'Вы' : p.name}
             </Text>
-          </View>
+          </Pressable>
         ))}
       </ScrollView>
+      <ParticipantSheet
+        participant={participants.find((p) => p.id === selectedId) ?? null}
+        canModerate={canModerate}
+        onClose={() => setSelectedId(null)}
+        onVolume={setVolume}
+        onModMute={modMute}
+      />
 
       <View style={styles.controls}>
         <Pressable
@@ -448,6 +482,7 @@ const styles = StyleSheet.create({
   grid: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'center', padding: 24, gap: 18 },
   cell: { width: 112, alignItems: 'center' },
   ring: { borderWidth: 3, borderRadius: 999, padding: 3 },
+  volBadge: { position: 'absolute', left: -2, bottom: 0, minWidth: 30, height: 20, paddingHorizontal: 4, borderRadius: 10, alignItems: 'center', justifyContent: 'center' },
   mutedBadge: { position: 'absolute', right: 0, bottom: 0, width: 26, height: 26, borderRadius: 13, alignItems: 'center', justifyContent: 'center' },
   controls: { flexDirection: 'row', justifyContent: 'center', gap: 22, paddingHorizontal: 24 },
   btn: { width: 66, height: 66, borderRadius: 33, alignItems: 'center', justifyContent: 'center' },

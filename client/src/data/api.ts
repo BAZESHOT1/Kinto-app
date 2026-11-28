@@ -1779,6 +1779,11 @@ export const api = {
     }>(`/v1/topics/${encodeURIComponent(topicId)}/voice/join`, { method: 'POST', body: JSON.stringify(body) }),
   topicVoiceLeave: (topicId: string) =>
     req<{ ok: true }>(`/v1/topics/${encodeURIComponent(topicId)}/voice/leave`, { method: 'POST', body: '{}' }),
+  /** Модератор: запретить/вернуть участнику микрофон у всех (групповой звонок). */
+  callModerate: (callId: string, userId: string, muted: boolean) =>
+    req<{ ok: true }>(`/v1/calls/${encodeURIComponent(callId)}/moderate`, { method: 'POST', body: JSON.stringify({ userId, muted }) }),
+  topicVoiceModerate: (topicId: string, userId: string, muted: boolean) =>
+    req<{ ok: true }>(`/v1/topics/${encodeURIComponent(topicId)}/voice/moderate`, { method: 'POST', body: JSON.stringify({ userId, muted }) }),
   callServers: () =>
     req<{ ok: true; servers: { id: string; domain: string; region: string; enabled: boolean; healthy: boolean }[] }>('/v1/calls/servers'),
   callJoin: (callId: string, sessionKey?: string) =>

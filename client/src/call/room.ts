@@ -21,11 +21,17 @@ export type CallParticipantView = {
   muted: boolean;
   /** Громкость 0..1 для индикатора. */
   level: number;
+  /** Моя громкость этого собеседника, 0…2 (100 % = 1). */
+  volume: number;
+  /** Модератор запретил участнику микрофон (у всех). */
+  modMuted: boolean;
 };
 
 export type CallRoomHandle = {
   setMuted: (muted: boolean) => Promise<void>;
   setSpeaker: (on: boolean) => Promise<void>;
+  /** Громкость собеседника у меня, 0…2 (0 — заглушить у себя). */
+  setParticipantVolume: (id: string, volume: number) => void;
   disconnect: () => Promise<void>;
 };
 
@@ -36,6 +42,8 @@ export type JoinOptions = {
   onPhase: (phase: CallPhase, reason?: string) => void;
 };
 
+const volumes = new Map<string, number>();
+
 const view = (p: Participant, local: boolean): CallParticipantView => ({
   id: p.identity,
   name: p.name || p.identity,
@@ -43,6 +51,8 @@ const view = (p: Participant, local: boolean): CallParticipantView => ({
   speaking: p.isSpeaking,
   muted: !p.isMicrophoneEnabled,
   level: p.audioLevel ?? 0,
+  volume: volumes.get(p.identity) ?? 1,
+  modMuted: p.permissions ? p.permissions.canPublish === false : false,
 });
 
 /** Подключиться к комнате: адрес сервера и токен выдаёт Hub (POST /v1/calls/start или /join). */
@@ -57,6 +67,8 @@ export async function joinCallRoom(opts: JoinOptions): Promise<CallRoomHandle> {
   const prefs = getAudioPrefs();
   const room = new Room({
     adaptiveStream: false,
+    // Web: громкость собеседников через WebAudio (GainNode) — доступно усиление выше 100 %.
+    webAudioMix: Platform.OS === 'web',
     dynacast: true,
     stopLocalTrackOnUnpublish: true,
     // Эквивалент getUserMedia({ audio: { noiseSuppression: true } }): web/Windows — браузерный движок,
@@ -99,7 +111,23 @@ export async function joinCallRoom(opts: JoinOptions): Promise<CallRoomHandle> {
   room
     .on(RoomEvent.TrackSubscribed, (track) => { attach(track); emit(); })
     .on(RoomEvent.TrackUnsubscribed, (track) => { detach(track); emit(); })
-    .on(RoomEvent.ParticipantConnected, emit)
+    .on(RoomEvent.ParticipantConnected, (p) => {
+      // Громкость, выставленная ранее, действует и после переподключения собеседника.
+      const v = volumes.get(p.identity);
+      if (v !== undefined) (p as unknown as { setVolume: (x: number) => void }).setVolume(v);
+      emit();
+    })
+    .on(RoomEvent.TrackSubscribed, (track, _pub, p) => {
+      const v = volumes.get(p.identity);
+      if (v !== undefined && track.kind === Track.Kind.Audio) (p as unknown as { setVolume: (x: number) => void }).setVolume(v);
+    })
+    .on(RoomEvent.ParticipantPermissionsChanged, (_prev, p) => {
+      // Модератор вернул право говорить — снова включаем микрофон (если я сам его не выключал).
+      if (p === room.localParticipant && p.permissions?.canPublish !== false && !wantMuted && !room.localParticipant.isMicrophoneEnabled) {
+        void room.localParticipant.setMicrophoneEnabled(true).then(emit).catch(() => undefined);
+      }
+      emit();
+    })
     .on(RoomEvent.ParticipantDisconnected, emit)
     .on(RoomEvent.ActiveSpeakersChanged, emit)
     .on(RoomEvent.TrackMuted, emit)
@@ -195,10 +223,18 @@ export async function joinCallRoom(opts: JoinOptions): Promise<CallRoomHandle> {
       await room.localParticipant.setMicrophoneEnabled(!muted);
       emit();
     },
+    setParticipantVolume: (id, volume) => {
+      const v = Math.max(0, Math.min(2, volume));
+      volumes.set(id, v);
+      const p = room.remoteParticipants.get(id);
+      if (p) (p as unknown as { setVolume: (x: number) => void }).setVolume(v);
+      emit();
+    },
     setSpeaker: async (on) => {
       await setSpeakerphone(on).catch(() => undefined);
     },
     disconnect: async () => {
+      volumes.clear();
       stopPrefsWatch?.();
       audioEls.forEach((el) => el.remove());
       audioEls.clear();
