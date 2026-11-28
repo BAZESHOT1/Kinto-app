@@ -75,6 +75,10 @@ export function handleCallIncomingEvent(event: Record<string, unknown>, myUserId
   if (event.from === myUserId) return;
   const s = useCallStore.getState();
   if (s.activeCallId === event.callId) return;
+  // Windows-оболочка: окно может быть скрыто в трее — поднимаем его и показываем системное уведомление.
+  try {
+    (globalThis as { kintoDesktop?: { incomingCall?: (name: string) => void } }).kintoDesktop?.incomingCall?.(String(event.fromName ?? 'Звонок'));
+  } catch { /* вне Windows-оболочки */ }
   s.setIncoming({
     callId: event.callId,
     from: String(event.from ?? ''),

@@ -1,0 +1,68 @@
+name: Windows EXE
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'client/**'
+      - '.github/workflows/windows-exe.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build-windows:
+    # Собирает только публичный репозиторий (как и остальные клиентские сборки).
+    if: github.repository == 'BAZESHOT1/Kinto-app'
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: bash
+        working-directory: client
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: client/package-lock.json
+
+      - name: Install client dependencies
+        run: npm ci --no-audit --no-fund
+
+      - name: Build web bundle for desktop
+        run: npx expo export -p web
+        env:
+          # Внутри приложения бандл открывается по app://, API — на боевом домене.
+          EXPO_PUBLIC_API_URL: https://kintoapp.xyz/api
+          EXPO_NO_TELEMETRY: 1
+          CI: 1
+
+      - name: Package Electron app
+        working-directory: client/desktop
+        run: |
+          rm -rf web
+          cp -r ../dist web
+          npm install --no-audit --no-fund
+          npm run dist
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: Kinto-windows
+          path: |
+            client/desktop/release/Kinto-windows-*.exe
+          if-no-files-found: error
+
+      - name: Publish release windows-latest
+        env:
+          GH_TOKEN: ${{ github.token }}
+        working-directory: .
+        run: |
+          VERSION=$(node -p "require('./client/package.json').version")
+          gh release delete windows-latest --yes --cleanup-tag 2>/dev/null || true
+          gh release create windows-latest client/desktop/release/Kinto-windows-*.exe \
+            --title "Kinto для Windows ${VERSION}" \
+            --notes "Windows-клиент Kinto ${VERSION} (коммит ${GITHUB_SHA::7}): установщик и portable-версия."

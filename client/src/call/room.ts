@@ -4,6 +4,7 @@
  */
 import { Platform } from 'react-native';
 import type { Participant, RemoteTrack, ConnectionState as LkConnectionState } from 'livekit-client';
+import { createNoiseProcessor } from './noiseSuppression';
 import { ensureCallGlobals } from './globals';
 import { setSpeakerphone, startCallAudioSession, stopCallAudioSession } from './audioSession';
 
@@ -104,7 +105,18 @@ export async function joinCallRoom(opts: JoinOptions): Promise<CallRoomHandle> {
   try {
     await room.connect(opts.url, opts.token, { autoSubscribe: true });
     await room.localParticipant.setMicrophoneEnabled(true);
-    if (Platform.OS === 'web') await room.startAudio().catch(() => undefined);
+    if (Platform.OS === 'web') {
+      await room.startAudio().catch(() => undefined);
+      // Локальное шумоподавление RNNoise (web и Windows). Ошибка не должна ломать звонок.
+      try {
+        const proc = createNoiseProcessor();
+        const pub = room.localParticipant.getTrackPublication(Track.Source.Microphone);
+        const track = pub?.audioTrack;
+        if (proc && track) await track.setProcessor(proc);
+      } catch (e) {
+        console.warn('[call] noise suppression unavailable', String(e));
+      }
+    }
   } catch (e) {
     await stopCallAudioSession().catch(() => undefined);
     room.disconnect();

@@ -1,0 +1,28 @@
+{
+  "name": "kinto-desktop",
+  "productName": "Kinto",
+  "version": "1.10.114",
+  "description": "Kinto для Windows",
+  "author": "Kinto",
+  "main": "main.js",
+  "private": true,
+  "scripts": {
+    "dist": "electron-builder --win nsis portable --x64 --publish never"
+  },
+  "build": {
+    "appId": "xyz.kintoapp.desktop",
+    "productName": "Kinto",
+    "directories": { "output": "release" },
+    "files": ["main.js", "preload.js", "icon.png", "web/**/*"],
+    "win": {
+      "target": ["nsis", "portable"],
+      "icon": "icon.png",
+      "artifactName": "Kinto-windows-${version}-${arch}.${ext}"
+    },
+    "nsis": { "oneClick": false, "allowToChangeInstallationDirectory": true, "perMachine": false }
+  },
+  "devDependencies": {
+    "electron": "33.2.1",
+    "electron-builder": "25.1.8"
+  }
+}
