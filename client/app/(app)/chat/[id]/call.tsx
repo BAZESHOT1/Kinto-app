@@ -6,11 +6,13 @@ import React from 'react';
 import { View } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useCallStore } from '../../../../src/call/callStore';
+import { setCallFlags } from '../../../../src/call/callFlags';
 
 export default function CallLauncher() {
-  const params = useLocalSearchParams<{ id?: string; type?: string; callId?: string; title?: string; mesh?: string }>();
+  const params = useLocalSearchParams<{ id?: string; type?: string; callId?: string; title?: string; mesh?: string; df?: string }>();
   const router = useRouter();
   React.useEffect(() => {
+    setCallFlags(typeof params.df === 'string' ? params.df : '');
     useCallStore.getState().openCall({
       chatId: params.id && params.id !== 'x' ? String(params.id) : '',
       chatType: String(params.type ?? ''),

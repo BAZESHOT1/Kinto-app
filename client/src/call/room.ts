@@ -7,6 +7,7 @@ import type { Participant, RemoteTrack, ConnectionState as LkConnectionState } f
 import { createNoiseProcessor } from './noiseSuppression';
 import { effectiveAgc, getAudioPrefs, onAudioPrefsChanged } from './audioPrefs';
 import { getSavedVolume, saveVolume } from './callVolumes';
+import { callFlag } from './callFlags';
 import { ensureCallGlobals, guarded } from './globals';
 import { setSpeakerphone, startCallAudioSession, stopCallAudioSession } from './audioSession';
 
@@ -77,14 +78,14 @@ export async function joinCallRoom(opts: JoinOptions): Promise<CallRoomHandle> {
     audioCaptureDefaults: {
       echoCancellation: prefs.echoCancellation,
       noiseSuppression: prefs.noiseSuppression,
-      autoGainControl: effectiveAgc(prefs, Platform.OS !== 'web'),
+      autoGainControl: callFlag('agc1') || effectiveAgc(prefs, Platform.OS !== 'web'),
       // Расширенные ограничения (voiceIsolation, sampleRate, channelCount) — только web/Windows: на телефонах WebRTC их не знает.
       ...(Platform.OS === 'web' ? { voiceIsolation: prefs.noiseSuppression, channelCount: 1, sampleRate: 48000 } : null),
       ...(prefs.micDeviceId ? { deviceId: prefs.micDeviceId } : null),
     },
     // Голос по интернету: Opus fullband (48 кГц) 32 кбит/с (при плохой сети снижается до 24, см. ниже), DTX, RED против потерь. AGC выключен — голос не «плоский».
     // На телефонах DTX/RED отключены: с ними JS-поток зависал на публикации микрофона (100 % CPU, кнопки не нажимались).
-    publishDefaults: { audioPreset: { maxBitrate: 32_000 }, dtx: Platform.OS === 'web', red: Platform.OS === 'web' },
+    publishDefaults: { audioPreset: { maxBitrate: callFlag('p64') ? 64_000 : 32_000 }, dtx: Platform.OS === 'web' || callFlag('dtx'), red: Platform.OS === 'web' || callFlag('red') },
   });
 
   const audioEls = new Map<string, HTMLMediaElement>();
@@ -123,6 +124,7 @@ export async function joinCallRoom(opts: JoinOptions): Promise<CallRoomHandle> {
       if (v !== undefined && track.kind === Track.Kind.Audio) (p as unknown as { setVolume: (x: number) => void }).setVolume(v);
     })
     .on(RoomEvent.ParticipantPermissionsChanged, (_prev, p) => {
+      if (callFlag('nph')) return;
       // Модератор вернул право говорить — снова включаем микрофон (если я сам его не выключал).
       if (p === room.localParticipant && p.permissions?.canPublish !== false && !wantMuted && !room.localParticipant.isMicrophoneEnabled) {
         void room.localParticipant.setMicrophoneEnabled(true).then(emit).catch(() => undefined);
@@ -140,6 +142,7 @@ export async function joinCallRoom(opts: JoinOptions): Promise<CallRoomHandle> {
       else if (state === ConnectionState.Connecting) opts.onPhase('connecting');
     })
     .on(RoomEvent.ConnectionQualityChanged, (quality, participant) => {
+      if (callFlag('noq')) return;
       // Адаптивный битрейт: при плохом качестве сети 24 кбит/с, иначе 32.
       if (participant !== room.localParticipant) return;
       try {
@@ -175,7 +178,7 @@ export async function joinCallRoom(opts: JoinOptions): Promise<CallRoomHandle> {
     await room.localParticipant.setMicrophoneEnabled(true);
     console.log('[call] step ready');
     // Настройки звука меняются во время звонка: перезапускаем захват микрофона с новыми ограничениями.
-    stopPrefsWatch = onAudioPrefsChanged(() => {
+    if (!callFlag('nopw')) stopPrefsWatch = onAudioPrefsChanged(() => {
       const next = getAudioPrefs();
       const mic = room.localParticipant.getTrackPublication(Track.Source.Microphone)?.audioTrack;
       if (!mic) return;
@@ -190,7 +193,7 @@ export async function joinCallRoom(opts: JoinOptions): Promise<CallRoomHandle> {
         .catch((e) => console.warn('[call] restart mic failed', String(e)));
     });
     // iOS: микрофон мог остаться выключенным (сессия ещё не активна) — проверяем и включаем повторно, пока пользователь сам его не выключил.
-    for (const delay of [1200, 3500, 8000]) {
+    for (const delay of callFlag('nowd') ? [] : [1200, 3500, 8000]) {
       setTimeout(() => {
         if (wantMuted || room.state !== ConnectionState.Connected || room.localParticipant.isMicrophoneEnabled) return;
         console.warn('[call] mic was off, re-enabling');

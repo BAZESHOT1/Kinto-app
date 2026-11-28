@@ -17,6 +17,7 @@ import { supportsSpeakerToggle } from './audioSession';
 import { startCallKeepAlive } from './callBackground';
 import { ParticipantSheet } from './ParticipantSheet';
 import { CallAudioSheet } from './CallAudioSheet';
+import { callFlag } from './callFlags';
 import { chooseCallChannel, type ChannelChoice } from './meshLinkState';
 import {
   joinCallRoom,
@@ -241,7 +242,7 @@ function ActiveCall({ session }: { session: CallSession }) {
         let res: StartRes | null = null as StartRes | null;
         if (session.topicId) {
           // Голосовой топик группы: пустой канал, телефон никому не звонит, комната создаётся при первом входе.
-          const t = await api.topicVoiceJoin(session.topicId, { sessionKey: session.key, serverId: await pickReachableServer() });
+          const t = await api.topicVoiceJoin(session.topicId, { sessionKey: session.key, serverId: callFlag('nopick') ? undefined : await pickReachableServer() });
           if (t.callId) {
             // Автоматический топик группового звонка — обычный звонок.
             res = (await api.callJoin(t.callId, session.key)) as unknown as StartRes;
@@ -252,7 +253,7 @@ function ActiveCall({ session }: { session: CallSession }) {
             throw new Error('topic_unavailable');
           }
         } else {
-          res = (joinId ? await api.callJoin(joinId, session.key) : await api.callStart({ chatId: chatId || undefined, channel: meshChannel ?? 'internet', serverId: meshChannel ? undefined : await pickReachableServer(), sessionKey: session.key })) as unknown as StartRes;
+          res = (joinId ? await api.callJoin(joinId, session.key) : await api.callStart({ chatId: chatId || undefined, channel: meshChannel ?? 'internet', serverId: meshChannel || callFlag('nopick') ? undefined : await pickReachableServer(), sessionKey: session.key })) as unknown as StartRes;
         }
 
         if (cancelled || !res) return;
@@ -308,6 +309,7 @@ function ActiveCall({ session }: { session: CallSession }) {
   // Звонок в фоне: на Android — foreground service с микрофоном, на web — wake lock и MediaSession, в Windows — блок сна.
   React.useEffect(() => {
     if (phase !== 'connected' && phase !== 'reconnecting') return undefined;
+    if (callFlag('nokeep')) return undefined;
     return startCallKeepAlive({ title, onHangup: () => void leave(true), onMute: () => void toggleMuteRef.current() });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [phase === 'connected' || phase === 'reconnecting']);
