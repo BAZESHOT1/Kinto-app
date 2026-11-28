@@ -13,6 +13,14 @@ export interface MeshServiceInfo {
   role?: string;
 }
 
+export function ensureForegroundHandler(): void {
+  /* на web не нужен */
+}
+
+export function markMeshServiceStopped(): void {
+  /* на web не нужен */
+}
+
 export async function startMeshForegroundService(_info?: MeshServiceInfo): Promise<void> {
   /* на web фонового BLE-сервиса нет */
 }

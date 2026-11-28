@@ -5,6 +5,7 @@
 import { Platform } from 'react-native';
 import type { Participant, RemoteTrack, ConnectionState as LkConnectionState } from 'livekit-client';
 import { createNoiseProcessor } from './noiseSuppression';
+import { getAudioPrefs, onAudioPrefsChanged } from './audioPrefs';
 import { ensureCallGlobals, guarded } from './globals';
 import { setSpeakerphone, startCallAudioSession, stopCallAudioSession } from './audioSession';
 
@@ -53,13 +54,22 @@ export async function joinCallRoom(opts: JoinOptions): Promise<CallRoomHandle> {
   const { ConnectionState, DisconnectReason, Room, RoomEvent, Track } = guarded(() => require('livekit-client') as typeof import('livekit-client'));
   console.log('[call] step audio-session');
   await startCallAudioSession();
+  const prefs = getAudioPrefs();
   const room = new Room({
     adaptiveStream: false,
     dynacast: true,
     stopLocalTrackOnUnpublish: true,
     // Эквивалент getUserMedia({ audio: { noiseSuppression: true } }): web/Windows — браузерный движок,
     // iOS/Android — react-native-webrtc (noiseSuppression) поверх AVAudioSession voiceChat / NoiseSuppressor.
-    audioCaptureDefaults: { echoCancellation: true, noiseSuppression: true, autoGainControl: false, voiceIsolation: true, channelCount: 1, sampleRate: 48000 },
+    audioCaptureDefaults: {
+      echoCancellation: prefs.echoCancellation,
+      noiseSuppression: prefs.noiseSuppression,
+      autoGainControl: prefs.autoGainControl,
+      voiceIsolation: prefs.noiseSuppression,
+      channelCount: 1,
+      sampleRate: 48000,
+      ...(prefs.micDeviceId ? { deviceId: prefs.micDeviceId } : null),
+    },
     // Голос по интернету: Opus fullband (48 кГц) 32 кбит/с (при плохой сети снижается до 24, см. ниже), DTX, RED против потерь. AGC выключен — голос не «плоский».
     publishDefaults: { audioPreset: { maxBitrate: 32_000 }, dtx: true, red: true },
   });
@@ -127,6 +137,7 @@ export async function joinCallRoom(opts: JoinOptions): Promise<CallRoomHandle> {
     });
 
   let wantMuted = false;
+  let stopPrefsWatch: (() => void) | null = null;
   opts.onPhase('connecting');
   try {
     console.log('[call] step connect', opts.url);
@@ -134,6 +145,23 @@ export async function joinCallRoom(opts: JoinOptions): Promise<CallRoomHandle> {
     console.log('[call] step microphone');
     await room.localParticipant.setMicrophoneEnabled(true);
     console.log('[call] step ready');
+    // Настройки звука меняются во время звонка: перезапускаем захват микрофона с новыми ограничениями.
+    stopPrefsWatch = onAudioPrefsChanged(() => {
+      const next = getAudioPrefs();
+      const mic = room.localParticipant.getTrackPublication(Track.Source.Microphone)?.audioTrack;
+      if (!mic) return;
+      void mic
+        .restartTrack({
+          echoCancellation: next.echoCancellation,
+          noiseSuppression: next.noiseSuppression,
+          autoGainControl: next.autoGainControl,
+          voiceIsolation: next.noiseSuppression,
+          channelCount: 1,
+          sampleRate: 48000,
+          ...(next.micDeviceId ? { deviceId: next.micDeviceId } : null),
+        })
+        .catch((e) => console.warn('[call] restart mic failed', String(e)));
+    });
     // iOS: микрофон мог остаться выключенным (сессия ещё не активна) — проверяем и включаем повторно, пока пользователь сам его не выключил.
     for (const delay of [1200, 3500, 8000]) {
       setTimeout(() => {
@@ -171,6 +199,7 @@ export async function joinCallRoom(opts: JoinOptions): Promise<CallRoomHandle> {
       await setSpeakerphone(on).catch(() => undefined);
     },
     disconnect: async () => {
+      stopPrefsWatch?.();
       audioEls.forEach((el) => el.remove());
       audioEls.clear();
       await room.disconnect().catch(() => undefined);

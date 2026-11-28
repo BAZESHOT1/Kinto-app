@@ -64,6 +64,16 @@ async function ensureMeshChannel(): Promise<void> {
   return channelPromise;
 }
 
+/** Общий обработчик foreground service (используют и mesh-модуль, и звонок). */
+export function ensureForegroundHandler(): void {
+  ensureServiceHandler();
+}
+
+/** Звонок остановил общий foreground service: mesh-сервис нужно запустить заново. */
+export function markMeshServiceStopped(): void {
+  running = false;
+}
+
 /**
  * Notifee требует ровно один зарегистрированный обработчик foreground service.
  * Промис не резолвим: сервис живёт, пока висит уведомление / приложение.

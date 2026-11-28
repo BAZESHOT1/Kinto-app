@@ -73,10 +73,13 @@ function highlightChunk(text: string, query: string, accent: string, accentSoft:
  * Текст сообщения с подсветкой @упоминаний (акцент) и совпадений поиска.
  * Упоминания — простой regex-парсер, без серверной разметки.
  */
-function richText(text: string, query: string, baseColor: string, accent: string, accentSoft: string, mine: boolean) {
+function richText(text: string, query: string, baseColor: string, accent: string, accentSoft: string, mine: boolean, selectable = false) {
   const chunks = text.split(MENTION_RE);
   return (
-    <Text style={[styles.text, { color: baseColor }]}>
+    <Text
+      selectable={selectable}
+      style={[styles.text, { color: baseColor }, selectable && Platform.OS === 'web' ? ({ userSelect: 'text', WebkitUserSelect: 'text', WebkitTouchCallout: 'default', cursor: 'text' } as object) : null]}
+    >
       {chunks.map((chunk, i) => {
         if (i % 2 === 1 && chunk.length > 1) {
           return (
@@ -190,6 +193,8 @@ export function MessageBubble({
   secret,
   viewsCount,
   post = false,
+  overlay = false,
+  onDoubleTap,
 }: {
   item: ViewMessage;
   group?: BubbleGroup;
@@ -240,9 +245,14 @@ export function MessageBubble({
   viewsCount?: number;
   /** Канал: сообщение — пост по центру экрана со скруглением со всех сторон. */
   post?: boolean;
+  /** Копия в оверлее удержания: текст можно выделять, долгое нажатие и жесты отключены. */
+  overlay?: boolean;
+  /** Двойное нажатие — быстрая реакция. */
+  onDoubleTap?: () => void;
 }) {
   const theme = useTheme();
   const reduced = useReducedMotion();
+  const lastTapRef = React.useRef(0);
   const ext = item as ViewMessageExt;
   // Локальное превью запоминаем: после подтверждения сервером проп localPreview
   // исчезает, но картинка не должна мигать/пропадать до расшифровки файла.
@@ -451,7 +461,18 @@ export function MessageBubble({
       >
         <Pressable
           ref={bubbleRef}
-          onLongPress={() => {
+          disabled={overlay}
+          onPress={() => {
+            if (overlay || !onDoubleTap) return;
+            const now = Date.now();
+            if (now - lastTapRef.current < 320) {
+              lastTapRef.current = 0;
+              onDoubleTap();
+            } else {
+              lastTapRef.current = now;
+            }
+          }}
+          onLongPress={overlay ? undefined : () => {
             // Замеряем ДО подъёма — якорь должен быть реальным кадром сообщения.
             bubbleRef.current?.measureInWindow((x, y, width, height) => {
               setHeld(true);
@@ -466,8 +487,8 @@ export function MessageBubble({
               setTimeout(() => setHeld(false), 900);
             }
           }}
-          onPressIn={() => setPressed(true)}
-          onPressOut={() => { setPressed(false); setHeld(false); }}
+          onPressIn={overlay ? undefined : () => setPressed(true)}
+          onPressOut={overlay ? undefined : () => { setPressed(false); setHeld(false); }}
           delayLongPress={400}
           {...(Platform.OS === 'web'
             ? { onContextMenu: (e: { preventDefault: () => void }) => e.preventDefault() }
@@ -480,7 +501,7 @@ export function MessageBubble({
           }
           style={({ pressed }) => [
             styles.bubble,
-            Platform.OS === 'web' ? styles.webNoSelect : null,
+            Platform.OS === 'web' && !overlay ? styles.webNoSelect : null,
             radii,
             {
               backgroundColor: pressed ? theme.surfacePressed : bubbleColor,
@@ -545,6 +566,7 @@ export function MessageBubble({
                 item.mine ? onMine : theme.accent,
                 item.mine ? 'rgba(255,255,255,0.3)' : theme.accentSoft,
                 item.mine,
+                overlay,
               ) : null}
               {item.files && item.files.length > 1
                 ? item.files.map((f, idx) => (
@@ -575,6 +597,7 @@ export function MessageBubble({
               item.mine ? onMine : theme.accent,
               item.mine ? 'rgba(255,255,255,0.3)' : theme.accentSoft,
               item.mine,
+              overlay,
             )
           ) : (
             <Text style={[styles.text, { color: item.mine ? onMine : theme.textSecondary, fontStyle: 'italic' }]}>🔒 Зашифрованное сообщение</Text>

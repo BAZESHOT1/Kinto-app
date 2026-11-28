@@ -47,6 +47,8 @@ export function MessageActionSheet({
   onRetry,
   allowCopy = true,
   anchor,
+  inline = false,
+  onLayoutHeight,
 }: {
   message: ViewMessage | null;
   pinned: boolean;
@@ -62,6 +64,9 @@ export function MessageActionSheet({
   allowCopy?: boolean;
   /** Экранные координаты сообщения — меню раскрывается под ним. */
   anchor?: { x: number; y: number; width: number; height: number } | null;
+  /** Встроенный режим: меню лежит в потоке оверлея и прокручивается вместе с сообщением. */
+  inline?: boolean;
+  onLayoutHeight?: (h: number) => void;
 }) {
   const theme = useTheme();
   const open = Boolean(message);
@@ -110,12 +115,13 @@ export function MessageActionSheet({
   const sub = theme.dark ? 'rgba(235,235,245,0.62)' : 'rgba(60,60,67,0.6)';
 
   return (
-    <View pointerEvents="box-none" style={[styles.root, NO_SELECT]}>
+    <View pointerEvents="box-none" style={[inline ? { alignSelf: mine ? 'flex-end' : 'flex-start' } : styles.root, NO_SELECT]}>
       <MotiView
         from={{ opacity: 0, scale: 0.88, translateY: -8 }}
         animate={{ opacity: 1, scale: 1, translateY: 0 }}
         transition={{ type: 'spring', damping: 22, stiffness: 320 }}
-        style={[styles.card, { borderColor: border, position: 'absolute' as const, left, top, width: cardW }]}
+        style={[styles.card, inline ? { borderColor: border, width: cardW } : { borderColor: border, position: 'absolute' as const, left, top, width: cardW }]}
+        onLayout={(e) => onLayoutHeight?.(Math.round(e.nativeEvent.layout.height))}
       >
         <BlurView
           intensity={Platform.OS === 'web' ? 0 : 80}

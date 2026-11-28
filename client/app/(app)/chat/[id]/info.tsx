@@ -192,7 +192,6 @@ function ChatInfoScreen({ forcedId }: { forcedId?: string } = {}) {
     !isDirect && (myRole === 'owner' || (myRole === 'admin' && hasRight(chat, myUsername, 'manageMembers')));
   const managePending = chat?.pendingRequests ?? 0;
   // Топики группы: выключены по умолчанию, включает владелец/админ/модератор.
-  const canManageTopics = !isDirect && type === 'group' && (myRole === 'owner' || myRole === 'admin' || myRole === 'moderator');
   const topicsQ = useQuery({
     queryKey: ['topics', chatId],
     queryFn: () => api.api.getTopics(chatId),
@@ -200,6 +199,8 @@ function ChatInfoScreen({ forcedId }: { forcedId?: string } = {}) {
     staleTime: 15_000,
   });
   const topicsOn = topicsQ.data?.enabled === true;
+  // Право на топики выдаёт владелец (матрица прав: «Топики»).
+  const canManageTopics = !isDirect && type === 'group' && topicsQ.data?.canManage === true;
 
   const pinned = chat?.pinnedMessage ?? null;
   const pinnedMessage = pinned ? messages.find((m) => m.id === pinned.id) ?? null : null;
@@ -360,6 +361,20 @@ function ChatInfoScreen({ forcedId }: { forcedId?: string } = {}) {
     }
   }
 
+  /** Персональное разрешение/запрет участнику приглашать. */
+  async function changeInviteOverride(member: ChatMemberRow, value: 'allow' | 'deny' | null) {
+    try {
+      await api.api.setInviteOverride(chatId, member.userId, value);
+      pushToast({ kind: 'success', message: value === 'allow' ? `@${member.username} может приглашать` : value === 'deny' ? `@${member.username} не может приглашать` : 'Право приглашать сброшено' });
+      await loadChat();
+      void qc.invalidateQueries({ queryKey: ['chats'] });
+    } catch (e: unknown) {
+      const message = manageError(e);
+      pushToast({ kind: 'error', message });
+      throw new Error(message);
+    }
+  }
+
   /** Исключение участника (кроме владельца). */
   async function removeChatMember(member: ChatMemberRow) {
     try {
@@ -416,7 +431,7 @@ function ChatInfoScreen({ forcedId }: { forcedId?: string } = {}) {
           },
         ]
       : []),
-    ...(!isDirect
+    ...(!isDirect && chat?.canInvite !== false
       ? [{ key: 'invite', icon: 'person-add-outline' as const, label: 'Пригласить', hint: 'ссылка или люди', onPress: () => setInviteMenu(true) }]
       : []),
   ];
@@ -690,8 +705,9 @@ function ChatInfoScreen({ forcedId }: { forcedId?: string } = {}) {
                 type={type}
                 myRole={myRole}
                 canManage={canManagePeople}
-                onChangeRole={changeMemberRole}
+                onChangeRole={canManagePeople ? changeMemberRole : undefined}
                 onRemove={removeChatMember}
+                onInviteOverride={canManagePeople ? changeInviteOverride : undefined}
                 onOpenUser={(u) => router.push(`/user/${u}` as never)}
               />
             ) : tab === 'manage' ? (

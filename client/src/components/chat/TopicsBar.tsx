@@ -4,7 +4,7 @@
  * показываются участники. Модераторы создают топики кнопкой «+», долгое нажатие — переименовать/удалить.
  */
 import React from 'react';
-import { Alert, Platform, Pressable, ScrollView, Text, TextInput, View } from 'react-native';
+import { Modal, Pressable, ScrollView, Text, TextInput, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '../../theme/useTheme';
 import type { ChatTopic } from '../../data/api';
@@ -35,7 +35,9 @@ export function TopicsBar({
   onDelete: (topic: ChatTopic) => void;
 }) {
   const theme = useTheme();
-  const [creating, setCreating] = React.useState(false);
+  // Редактор топика (создание / переименование) и меню действий — модальные окна (работают и на web).
+  const [editor, setEditor] = React.useState<{ mode: 'create' | 'rename'; topic: ChatTopic | null } | null>(null);
+  const [menu, setMenu] = React.useState<ChatTopic | null>(null);
   const [kind, setKind] = React.useState<'text' | 'voice'>('text');
   const [title, setTitle] = React.useState('');
 
@@ -51,38 +53,14 @@ export function TopicsBar({
     backgroundColor: selected ? (accent ? 'rgba(34,197,94,0.16)' : theme.accentSoft) : theme.surfaceElevated,
   });
 
-  const manage = (t: ChatTopic) => {
-    if (!canManage || t.auto) return;
-    const run = (rename: boolean) => {
-      if (!rename) {
-        onDelete(t);
-        return;
-      }
-      if (Platform.OS === 'ios' && Alert.prompt) {
-        Alert.prompt('Переименовать топик', undefined, (v) => v?.trim() && onRename(t, v.trim()), 'plain-text', t.title);
-      } else {
-        setKind(t.kind);
-        setTitle(t.title);
-        setCreating(true);
-        renameTarget.current = t;
-      }
-    };
-    Alert.alert(t.title, undefined, [
-      { text: 'Переименовать', onPress: () => run(true) },
-      { text: 'Удалить', style: 'destructive', onPress: () => run(false) },
-      { text: 'Отмена', style: 'cancel' },
-    ]);
-  };
-  const renameTarget = React.useRef<ChatTopic | null>(null);
-
+  const openCreate = () => { setKind('text'); setTitle(''); setEditor({ mode: 'create', topic: null }); };
+  const manage = (t: ChatTopic) => { if (canManage && !t.auto) setMenu(t); };
   const submit = () => {
     const v = title.trim();
-    if (!v) return;
-    if (renameTarget.current) onRename(renameTarget.current, v);
+    if (!v || !editor) return;
+    if (editor.mode === 'rename' && editor.topic) onRename(editor.topic, v);
     else onCreate(kind, v);
-    renameTarget.current = null;
-    setTitle('');
-    setCreating(false);
+    setEditor(null);
   };
 
   return (
@@ -125,34 +103,78 @@ export function TopicsBar({
           );
         })}
         {canManage ? (
-          <Pressable onPress={() => { renameTarget.current = null; setTitle(''); setCreating((v) => !v); }} accessibilityRole="button" accessibilityLabel="Добавить топик" style={chip(false)}>
+          <Pressable onPress={openCreate} accessibilityRole="button" accessibilityLabel="Добавить топик" style={chip(false)}>
             <Ionicons name="add" size={18} color={theme.textSecondary} />
           </Pressable>
         ) : null}
       </ScrollView>
-      {creating ? (
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 12, paddingTop: 8 }}>
-          {!renameTarget.current ? (
-            <Pressable onPress={() => setKind((k) => (k === 'text' ? 'voice' : 'text'))} accessibilityRole="button" style={chip(true, kind === 'voice' ? GREEN : undefined)}>
-              <Ionicons name={kind === 'voice' ? 'volume-high' : 'chatbubble-outline'} size={15} color={kind === 'voice' ? GREEN : theme.accent} />
-              <Text style={{ color: kind === 'voice' ? GREEN : theme.accent, fontWeight: '700', fontSize: 13 }}>{kind === 'voice' ? 'Голосовой' : 'Текстовый'}</Text>
-            </Pressable>
-          ) : null}
-          <TextInput
-            value={title}
-            onChangeText={setTitle}
-            onSubmitEditing={submit}
-            placeholder="Название топика"
-            placeholderTextColor={theme.textDisabled}
-            maxLength={40}
-            autoFocus
-            style={{ flex: 1, color: theme.textPrimary, borderWidth: 1, borderColor: theme.line, borderRadius: 14, paddingHorizontal: 12, paddingVertical: 8, backgroundColor: theme.surfaceElevated }}
-          />
-          <Pressable onPress={submit} accessibilityRole="button" accessibilityLabel="Сохранить" style={chip(true)}>
-            <Ionicons name="checkmark" size={18} color={theme.accent} />
+      <Modal visible={editor !== null} transparent animationType="fade" onRequestClose={() => setEditor(null)}>
+        <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'center', padding: 20 }} onPress={() => setEditor(null)}>
+          <Pressable onPress={() => undefined} style={{ alignSelf: 'center', width: '100%', maxWidth: 420, borderRadius: 24, padding: 18, gap: 14, backgroundColor: theme.surfaceElevated, borderWidth: 1, borderColor: theme.line }}>
+            <Text style={{ color: theme.textPrimary, fontSize: 18, fontWeight: '800' }}>{editor?.mode === 'rename' ? 'Переименовать топик' : 'Новый топик'}</Text>
+            {editor?.mode === 'create' ? (
+              <View style={{ flexDirection: 'row', gap: 8 }}>
+                {([['text', 'Текстовый', 'chatbubble-outline', undefined], ['voice', 'Голосовой', 'volume-high', GREEN]] as const).map(([k, label, icon, accent]) => {
+                  const sel = kind === k;
+                  return (
+                    <Pressable key={k} onPress={() => setKind(k)} accessibilityRole="button" style={[chip(sel, accent), { flex: 1, justifyContent: 'center', paddingVertical: 12 }]}>
+                      <Ionicons name={icon} size={17} color={sel ? accent ?? theme.accent : theme.textSecondary} />
+                      <Text style={{ color: sel ? accent ?? theme.accent : theme.textPrimary, fontWeight: '700', fontSize: 14 }}>{label}</Text>
+                    </Pressable>
+                  );
+                })}
+              </View>
+            ) : null}
+            {editor?.mode === 'create' ? (
+              <Text style={{ color: theme.textSecondary, fontSize: 12.5, lineHeight: 17 }}>
+                {kind === 'voice' ? 'Голосовой топик — постоянная комната: участники входят и выходят, остальным никто не звонит.' : 'Текстовый топик — отдельная лента сообщений; в «Общем» видны сообщения всех топиков.'}
+              </Text>
+            ) : null}
+            <TextInput
+              value={title}
+              onChangeText={setTitle}
+              onSubmitEditing={submit}
+              placeholder="Название (например, Флуд)"
+              placeholderTextColor={theme.textDisabled}
+              maxLength={40}
+              autoFocus
+              style={{ color: theme.textPrimary, fontSize: 16, borderWidth: 1, borderColor: theme.line, borderRadius: 14, paddingHorizontal: 14, paddingVertical: 12, backgroundColor: theme.background }}
+            />
+            <View style={{ flexDirection: 'row', gap: 10 }}>
+              <Pressable onPress={() => setEditor(null)} accessibilityRole="button" style={[chip(false), { flex: 1, justifyContent: 'center', paddingVertical: 12 }]}>
+                <Text style={{ color: theme.textPrimary, fontWeight: '700' }}>Отмена</Text>
+              </Pressable>
+              <Pressable onPress={submit} disabled={!title.trim()} accessibilityRole="button" style={[chip(true), { flex: 1, justifyContent: 'center', paddingVertical: 12, opacity: title.trim() ? 1 : 0.5 }]}>
+                <Text style={{ color: theme.accent, fontWeight: '800' }}>{editor?.mode === 'rename' ? 'Сохранить' : 'Создать'}</Text>
+              </Pressable>
+            </View>
           </Pressable>
-        </View>
-      ) : null}
+        </Pressable>
+      </Modal>
+
+      <Modal visible={menu !== null} transparent animationType="fade" onRequestClose={() => setMenu(null)}>
+        <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.45)', justifyContent: 'flex-end', padding: 14 }} onPress={() => setMenu(null)}>
+          <View style={{ alignSelf: 'center', width: '100%', maxWidth: 420, borderRadius: 22, overflow: 'hidden', backgroundColor: theme.surfaceElevated, borderWidth: 1, borderColor: theme.line }}>
+            <Text style={{ color: theme.textSecondary, fontSize: 13, fontWeight: '700', padding: 14, paddingBottom: 6 }} numberOfLines={1}>{menu?.title}</Text>
+            <Pressable
+              onPress={() => { const t = menu; setMenu(null); if (t) { setTitle(t.title); setEditor({ mode: 'rename', topic: t }); } }}
+              accessibilityRole="button"
+              style={({ pressed }) => ({ flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 16, paddingVertical: 15, backgroundColor: pressed ? theme.surfacePressed : 'transparent' })}
+            >
+              <Ionicons name="create-outline" size={20} color={theme.accent} />
+              <Text style={{ color: theme.textPrimary, fontSize: 16, fontWeight: '600' }}>Переименовать</Text>
+            </Pressable>
+            <Pressable
+              onPress={() => { const t = menu; setMenu(null); if (t) onDelete(t); }}
+              accessibilityRole="button"
+              style={({ pressed }) => ({ flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 16, paddingVertical: 15, backgroundColor: pressed ? theme.surfacePressed : 'transparent' })}
+            >
+              <Ionicons name="trash-outline" size={20} color={theme.danger} />
+              <Text style={{ color: theme.danger, fontSize: 16, fontWeight: '600' }}>Удалить топик</Text>
+            </Pressable>
+          </View>
+        </Pressable>
+      </Modal>
     </View>
   );
 }

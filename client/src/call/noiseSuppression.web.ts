@@ -7,9 +7,13 @@
  * Если WebAudio недоступен или инициализация упала — звонок идёт без обработки.
  */
 import type { TrackProcessor, Track } from 'livekit-client';
+import { getAudioPrefs, useAudioPrefs } from './audioPrefs';
 
 export function createNoiseProcessor(): TrackProcessor<Track.Kind.Audio> | null {
   if (typeof window === 'undefined' || typeof AudioContext === 'undefined') return null;
+  const prefs0 = getAudioPrefs();
+  // Цепочка выключена в настройках, а усиление не нужно — звук идёт как есть.
+  if (!prefs0.voiceChain && prefs0.micGain === 1) return null;
   let rnnoise = false;
   try {
     rnnoise = window.localStorage.getItem('sg:rnnoise') === '1' && typeof AudioWorkletNode !== 'undefined';
@@ -19,6 +23,7 @@ export function createNoiseProcessor(): TrackProcessor<Track.Kind.Audio> | null 
   let ctx: AudioContext | null = null;
   let nodes: AudioNode[] = [];
   let source: MediaStreamAudioSourceNode | null = null;
+  let unsubscribe: (() => void) | null = null;
   const processor = {
     name: 'kinto-voice',
     processedTrack: undefined as MediaStreamTrack | undefined,
@@ -31,6 +36,7 @@ export function createNoiseProcessor(): TrackProcessor<Track.Kind.Audio> | null 
         await ctx.audioWorklet.addModule('/rnnoise-worklet.js');
         chain.push(new AudioWorkletNode(ctx, 'NoiseSuppressorWorklet'));
       }
+      const voice = getAudioPrefs().voiceChain;
       const hp = ctx.createBiquadFilter();
       hp.type = 'highpass'; hp.frequency.value = 90; hp.Q.value = 0.707;
       const boom = ctx.createBiquadFilter();
@@ -42,10 +48,14 @@ export function createNoiseProcessor(): TrackProcessor<Track.Kind.Audio> | null 
       const comp = ctx.createDynamicsCompressor();
       comp.threshold.value = -26; comp.knee.value = 14; comp.ratio.value = 3; comp.attack.value = 0.006; comp.release.value = 0.16;
       const makeup = ctx.createGain();
-      makeup.gain.value = 1.6; // ≈ +4 дБ после компрессии (AGC выключен)
+      const baseGain = voice ? 1.6 : 1; // ≈ +4 дБ после компрессии (AGC выключен)
+      makeup.gain.value = baseGain * getAudioPrefs().micGain;
+      unsubscribe = useAudioPrefs.subscribe((st) => { makeup.gain.value = baseGain * st.micGain; });
       const limiter = ctx.createDynamicsCompressor();
       limiter.threshold.value = -3; limiter.knee.value = 0; limiter.ratio.value = 20; limiter.attack.value = 0.001; limiter.release.value = 0.08;
-      chain.push(hp, boom, presence, air, comp, makeup, limiter);
+      if (voice) chain.push(hp, boom, presence, air, comp);
+      chain.push(makeup);
+      if (voice) chain.push(limiter);
       const dest = ctx.createMediaStreamDestination();
       let prev: AudioNode = source;
       for (const n of chain) { prev.connect(n); prev = n; }
@@ -58,7 +68,7 @@ export function createNoiseProcessor(): TrackProcessor<Track.Kind.Audio> | null 
       await processor.init(opts);
     },
     async destroy() {
-      try { source?.disconnect(); nodes.forEach((n) => n.disconnect()); } catch { /* уже отключено */ }
+      try { unsubscribe?.(); source?.disconnect(); nodes.forEach((n) => n.disconnect()); } catch { /* уже отключено */ }
       try { await ctx?.close(); } catch { /* уже закрыт */ }
       ctx = null; nodes = []; source = null;
       processor.processedTrack = undefined;

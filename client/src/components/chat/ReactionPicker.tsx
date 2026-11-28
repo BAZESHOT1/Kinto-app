@@ -36,6 +36,8 @@ export function ReactionPicker({
   onPick,
   anchor,
   mine = false,
+  inline = false,
+  onLayoutHeight,
 }: {
   visible: boolean;
   onClose: () => void;
@@ -46,6 +48,9 @@ export function ReactionPicker({
   anchor?: BubbleFrame | null;
   /** Своё сообщение: панель прижимается к правому краю пузыря. */
   mine?: boolean;
+  /** Встроенный режим: панель лежит в потоке оверлея (он сам расставляет меню и прокручивается). */
+  inline?: boolean;
+  onLayoutHeight?: (h: number) => void;
 }) {
   const theme = useTheme();
   const reduced = useReducedMotion();
@@ -72,8 +77,9 @@ export function ReactionPicker({
   const fill = theme.dark ? 'rgba(34,34,38,0.62)' : 'rgba(250,250,252,0.78)';
   const border = theme.dark ? 'rgba(255,255,255,0.10)' : 'rgba(0,0,0,0.06)';
 
+  const Wrapper = inline ? View : View;
   return (
-    <View pointerEvents="box-none" style={[StyleSheet.absoluteFill, NO_SELECT]}>
+    <Wrapper pointerEvents="box-none" style={[inline ? { alignSelf: mine ? 'flex-end' : 'flex-start' } : StyleSheet.absoluteFill, NO_SELECT]}>
       <MotiView
         from={{ opacity: 0, scale: reduced ? 1 : 0.86, translateY: reduced ? 0 : 10 }}
         animate={{ opacity: 1, scale: 1, translateY: 0 }}
@@ -81,8 +87,9 @@ export function ReactionPicker({
         style={[
           styles.card,
           expanded ? styles.cardExpanded : null,
-          { borderColor: border, position: 'absolute' as const, left, width: cardW, ...position },
+          inline ? { borderColor: border, width: cardW } : { borderColor: border, position: 'absolute' as const, left, width: cardW, ...position },
         ]}
+        onLayout={(e) => onLayoutHeight?.(Math.round(e.nativeEvent.layout.height))}
       >
         <BlurView
           intensity={Platform.OS === 'web' ? 0 : 70}
@@ -137,7 +144,7 @@ export function ReactionPicker({
           </View>
         )}
       </MotiView>
-    </View>
+    </Wrapper>
   );
 }
 

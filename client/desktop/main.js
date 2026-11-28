@@ -8,7 +8,7 @@
  *    сообщения и входящие звонки показываются и при свёрнутом окне.
  *  - Звонки: WebRTC (LiveKit) и микрофон разрешены; шумоподавление RNNoise включено в клиенте.
  */
-const { app, BrowserWindow, Menu, Notification, Tray, dialog, ipcMain, nativeImage, protocol, net, session, shell } = require('electron');
+const { app, BrowserWindow, Menu, Notification, Tray, dialog, ipcMain, nativeImage, powerSaveBlocker, protocol, net, session, shell } = require('electron');
 const path = require('node:path');
 const fs = require('node:fs');
 const { pathToFileURL } = require('node:url');
@@ -176,6 +176,15 @@ app.whenReady().then(() => {
     n.on('click', showWindow);
     n.show();
     showWindow();
+  });
+  // Звонок: блокируем энергосбережение (иначе в трее/при свёрнутом окне звонок может прерваться).
+  let blockerId = null;
+  ipcMain.on('kinto:call-active', (_e, payload) => {
+    if (payload?.on && blockerId === null) blockerId = powerSaveBlocker.start('prevent-app-suspension');
+    else if (!payload?.on && blockerId !== null) {
+      try { powerSaveBlocker.stop(blockerId); } catch { /* уже остановлен */ }
+      blockerId = null;
+    }
   });
   ipcMain.on('kinto:notify', (_e, payload) => {
     const n = new Notification({ title: String(payload?.title || 'Kinto'), body: String(payload?.body || ''), icon: iconPath() });

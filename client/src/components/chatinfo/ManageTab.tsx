@@ -13,6 +13,7 @@ import { ManageChips } from './ManageUI';
 import { ManageInfo } from './ManageInfo';
 import { ManagePermissions } from './ManagePermissions';
 import { ManageInvites } from './ManageInvites';
+import { ManageInvitePolicy } from './ManageInvitePolicy';
 import { ManageRequests } from './ManageRequests';
 import { ManageBans } from './ManageBans';
 import { ManageAudit } from './ManageAudit';
@@ -68,6 +69,7 @@ export function ManageTab({
     const list: { key: string; label: string; badge?: number }[] = [{ key: 'info', label: 'Информация' }];
     if (isOwner) list.push({ key: 'rights', label: 'Права' });
     if (canInvites) list.push({ key: 'links', label: 'Ссылки' });
+    if (isOwner || canInvites) list.push({ key: 'policy', label: 'Приглашения' });
     if (canRequests) list.push({ key: 'requests', label: 'Заявки', badge: pendingCount });
     if (canBans) list.push({ key: 'bans', label: 'Блокировки' });
     if (canAudit) list.push({ key: 'audit', label: 'Журнал' });
@@ -120,6 +122,8 @@ export function ManageTab({
         ) : null}
 
         {tab === 'links' ? <ManageInvites chatId={chat.id} chatTitle={chat.title} onChanged={refresh} /> : null}
+
+        {tab === 'policy' ? <ManageInvitePolicy chat={chat} onChanged={refresh} /> : null}
 
         {tab === 'requests' ? <ManageRequests chatId={chat.id} onChanged={refresh} /> : null}
 

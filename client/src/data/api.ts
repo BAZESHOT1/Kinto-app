@@ -224,7 +224,7 @@ export type ChatTopic = {
   callId: string | null;
   members: TopicMember[];
 };
-export type TopicsState = { ok: true; enabled: boolean; topics: ChatTopic[] };
+export type TopicsState = { ok: true; enabled: boolean; canManage?: boolean; topics: ChatTopic[] };
 
 async function req<T>(path: string, init: RequestInit = {}): Promise<T> {
   const isAuthCall = path.startsWith('/v1/auth/');
@@ -472,6 +472,8 @@ export interface ChatPermissionSet {
   setAvatar: boolean;
   /** Смена фона группы/канала. */
   setBackground: boolean;
+  /** Топики группы: включение, создание, переименование, удаление. */
+  manageTopics: boolean;
 }
 
 /** Матрица прав чата по ролям (владелец — всегда всё). */
@@ -638,7 +640,11 @@ export interface AdminChatRef {
 /** Полное представление чата для модератора (GET /v1/admin/chats/:id/view). */
 export interface AdminChatView {
   chat: { id: string; type: string; title: string; encryption: string; membersCount: number };
-  members: { userId: string; username: string; displayName: string; role: string }[];
+  members: { userId: string; username: string; displayName: string; role: string; inviteOverride?: 'allow' | 'deny' | null }[];
+  /** Кто может приглашать: все или только администрация. */
+  invitePolicy?: 'all' | 'admins';
+  /** Может ли зритель приглашать в этот чат. */
+  canInvite?: boolean;
   messages: {
     id: string;
     seq: number;
@@ -1747,6 +1753,10 @@ export const api = {
       members: string[];
     }>('/v1/calls/start', { method: 'POST', body: JSON.stringify(body) }),
   /* ---- топики групп ---- */
+  setInvitePolicy: (chatId: string, policy: 'all' | 'admins') =>
+    req<{ ok: true; invitePolicy: 'all' | 'admins' }>(`/v1/chats/${encodeURIComponent(chatId)}/invite-policy`, { method: 'PATCH', body: JSON.stringify({ policy }) }),
+  setInviteOverride: (chatId: string, userId: string, override: 'allow' | 'deny' | null) =>
+    req<{ ok: true }>(`/v1/chats/${encodeURIComponent(chatId)}/members/${encodeURIComponent(userId)}/invite-override`, { method: 'PUT', body: JSON.stringify({ override }) }),
   getTopics: (chatId: string) => req<TopicsState>(`/v1/chats/${encodeURIComponent(chatId)}/topics`),
   setTopicsEnabled: (chatId: string, enabled: boolean) =>
     req<TopicsState>(`/v1/chats/${encodeURIComponent(chatId)}/topics-enabled`, { method: 'PUT', body: JSON.stringify({ enabled }) }),

@@ -14,6 +14,7 @@ import { useStore } from '../state/useStore';
 import { useCallStore, type CallSession } from './callStore';
 import { startMeshVoice, type MeshVoiceHandle } from './meshVoice';
 import { supportsSpeakerToggle } from './audioSession';
+import { startCallKeepAlive } from './callBackground';
 import { chooseCallChannel, type ChannelChoice } from './meshLinkState';
 import {
   joinCallRoom,
@@ -143,6 +144,69 @@ function ActiveCall({ session }: { session: CallSession }) {
     [setActiveCallId],
   );
 
+  // Подключение к комнате LiveKit; при обрыве (свернули браузер/PWA, пропала сеть, система усыпила приложение)
+  // звонок не завершается, а переподключается с новым токеном.
+  const rejoinRef = React.useRef<() => void>(() => undefined);
+  const rejoiningRef = React.useRef(false);
+  const joinWith = React.useCallback(
+    (url: string, token: string) =>
+      joinCallRoom({
+        url,
+        token,
+        onParticipants: (list) => !closedRef.current && setParticipants(list),
+        onPhase: (p, reason) => {
+          if (closedRef.current) return;
+          if (p === 'connected' && !connectedAtRef.current) { connectedAtRef.current = Date.now(); useCallStore.getState().setConnectedAt(connectedAtRef.current); }
+          if (p === 'disconnected') {
+            if (reason) console.warn('[call] disconnected', reason);
+            // Тот же аккаунт вошёл на другом устройстве — тихо выходим.
+            if (reason === 'duplicate') void leave(false, true);
+            else rejoinRef.current();
+            return;
+          }
+          setPhase(p);
+        },
+      }),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [leave],
+  );
+  rejoinRef.current = () => {
+    if (rejoiningRef.current || closedRef.current || meshMode) {
+      if (meshMode && !closedRef.current) void leave(false);
+      return;
+    }
+    rejoiningRef.current = true;
+    setPhase('reconnecting');
+    void (async () => {
+      try {
+        await roomRef.current?.disconnect().catch(() => undefined);
+        roomRef.current = null;
+        for (let i = 0; i < 40 && !closedRef.current; i += 1) {
+          await new Promise((r) => setTimeout(r, i < 3 ? 1500 : 4000));
+          if (closedRef.current) return;
+          try {
+            const res = (topicRef.current
+              ? await api.topicVoiceJoin(topicRef.current, { sessionKey: session.key })
+              : await api.callJoin(callIdRef.current, session.key)) as unknown as { server?: { url: string }; token?: string };
+            if (!res.server || !res.token) throw new Error('no_token');
+            const room = await joinWith(res.server.url, res.token);
+            if (closedRef.current) { await room.disconnect(); return; }
+            roomRef.current = room;
+            void room.setSpeaker(speakerRef.current);
+            setPhase('connected');
+            return;
+          } catch (e) {
+            const code = e instanceof Error ? e.message : String(e);
+            if (/call_ended|call_forbidden|not_found|call_full/.test(code)) { void leave(false); return; }
+          }
+        }
+        void leave(false);
+      } finally {
+        rejoiningRef.current = false;
+      }
+    })();
+  };
+
   // Запуск: исходящий звонок (start) или вход в чужой (join). Hub возвращает сервер и токен.
   React.useEffect(() => {
     let cancelled = false;
@@ -190,21 +254,7 @@ function ActiveCall({ session }: { session: CallSession }) {
           setParticipants([{ id: 'me', name: 'Вы', local: true, speaking: false, muted: false, level: 0 }]);
           return;
         }
-        const room = await joinCallRoom({
-          url: res.server.url,
-          token: res.token,
-          onParticipants: (list) => !closedRef.current && setParticipants(list),
-          onPhase: (p, reason) => {
-            if (closedRef.current) return;
-            if (p === 'connected' && !connectedAtRef.current) { connectedAtRef.current = Date.now(); useCallStore.getState().setConnectedAt(connectedAtRef.current); }
-            if (p === 'disconnected') {
-              if (reason) console.warn('[call] disconnected', reason);
-              void leave(false, reason === 'duplicate');
-              return;
-            }
-            setPhase(p);
-          },
-        });
+        const room = await joinWith(res.server.url, res.token);
         if (cancelled) {
           await room.disconnect();
           return;
@@ -240,6 +290,13 @@ function ActiveCall({ session }: { session: CallSession }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // Звонок в фоне: на Android — foreground service с микрофоном, на web — wake lock и MediaSession, в Windows — блок сна.
+  React.useEffect(() => {
+    if (phase !== 'connected' && phase !== 'reconnecting') return undefined;
+    return startCallKeepAlive({ title, onHangup: () => void leave(true), onMute: () => void toggleMuteRef.current() });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [phase === 'connected' || phase === 'reconnecting']);
+
   // Звонок перехвачен другим устройством этого аккаунта — тихо выходим (сервер уже знает).
   const replacedCallId = useCallStore((st) => st.replacedCallId);
   React.useEffect(() => {
@@ -270,12 +327,14 @@ function ActiveCall({ session }: { session: CallSession }) {
     return () => clearTimeout(t);
   }, [participants, isDirect, phase, leave]);
 
+  const toggleMuteRef = React.useRef<() => Promise<void>>(async () => undefined);
   const toggleMute = async () => {
     const next = !muted;
     setMuted(next);
     await roomRef.current?.setMuted(next);
     meshRef.current?.setMuted(next);
   };
+  toggleMuteRef.current = toggleMute;
   const toggleSpeaker = async () => {
     const next = !speaker;
     setSpeaker(next);

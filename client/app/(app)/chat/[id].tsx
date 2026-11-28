@@ -33,6 +33,7 @@ import { contentWidth, listBottomReserve, spacing } from '../../../src/theme/lay
 import { Wallpaper } from '../../../src/components/Wallpaper';
 import { ActiveCallBanner } from '../../../src/components/chat/ActiveCallBanner';
 import { TopicsBar } from '../../../src/components/chat/TopicsBar';
+import { HoldOverlay } from '../../../src/components/chat/HoldOverlay';
 import { setSendTopic } from '../../../src/data/topicContext';
 import { ProgressiveBlur } from '../../../src/components/chat/ProgressiveBlur';
 import { Glass, GLASS_FILL_BUTTON } from '../../../src/components/Glass';
@@ -683,7 +684,7 @@ function ChatScreen({ forcedId }: { forcedId?: string } = {}) {
   });
   const topicsEnabled = topicsQuery.data?.enabled === true;
   const topics = topicsQuery.data?.topics ?? [];
-  const canManageTopics = myRole === 'owner' || myRole === 'admin' || myRole === 'moderator';
+  const canManageTopics = topicsQuery.data?.canManage === true;
   const refreshTopics = useCallback(() => void topicsQuery.refetch(), [topicsQuery]);
   useEffect(() => {
     // Текущий топик попадает в header отправляемых сообщений (topicId); «Общий» — без него.
@@ -1076,11 +1077,12 @@ function ChatScreen({ forcedId }: { forcedId?: string } = {}) {
   }, [chat, allMessages.length, scrollToEnd]);
 
   // Пустой чат или долгая раскладка: показываем ленту в любом случае, чтобы она не оставалась скрытой.
+  // Пустой кэш: ждём ответ сервера, иначе лента успевает отрисоваться с начала и «перепрыгнуть» к концу.
   useEffect(() => {
-    if (allMessages.length === 0) setListShown(true);
-    const t = setTimeout(() => setListShown(true), 1200);
+    if (allMessages.length === 0 && chatQuery.isFetchedAfterMount) setListShown(true);
+    const t = setTimeout(() => setListShown(true), 2500);
     return () => clearTimeout(t);
-  }, [chatId, allMessages.length === 0]);
+  }, [chatId, allMessages.length === 0, chatQuery.isFetchedAfterMount]);
 
   // Когда с сервера пришла полная лента, ещё раз встаём на последнее
   // прочитанное: кэш мог содержать только 8+8 сообщений.
@@ -1910,6 +1912,7 @@ function ChatScreen({ forcedId }: { forcedId?: string } = {}) {
                       highlightActive={searchActive && index === matchIndex}
                       flash={Boolean(flashIds[row.m.id])}
                       onReactionPress={(emoji) => void reactTo(row.m, emoji)}
+                      onDoubleTap={() => void reactTo(row.m, '❤️')}
                       nodeOnline={memberPresence.get(row.m.senderUsername)?.nodeOnline}
                       moduleOnline={memberPresence.get(row.m.senderUsername)?.moduleOnline}
                       avatar={memberPresence.get(row.m.senderUsername)?.avatar}
@@ -2435,31 +2438,62 @@ function ChatScreen({ forcedId }: { forcedId?: string } = {}) {
           animationType="none"
           onRequestClose={closeHoldMenu}
         >
-          <HoldBackdrop anchor={menuAnchor} dark={theme.dark} onClose={closeHoldMenu} />
-          <ReactionPicker
-            visible={Boolean(reactionTarget)}
+          <HoldOverlay
             anchor={menuAnchor}
-            onClose={closeHoldMenu}
-            onPick={(emoji) => {
-              if (reactionTarget) void reactTo(reactionTarget, emoji);
-              closeHoldMenu();
-            }}
             mine={Boolean((reactionTarget ?? sheetMessage)?.mine)}
+            onClose={closeHoldMenu}
+            bubble={
+              (reactionTarget ?? sheetMessage) ? (
+                <MessageBubble
+                  overlay
+                  item={(reactionTarget ?? sheetMessage) as ViewMessage}
+                  group="single"
+                  post={isChannel}
+                  onCopy={() => undefined}
+                  onReply={() => undefined}
+                  onDelete={() => undefined}
+                  quoted={quotedFor((reactionTarget ?? sheetMessage) as ViewMessage)}
+                  nodeOnline={memberPresence.get((reactionTarget ?? sheetMessage)?.senderUsername ?? '')?.nodeOnline}
+                  moduleOnline={memberPresence.get((reactionTarget ?? sheetMessage)?.senderUsername ?? '')?.moduleOnline}
+                  avatar={memberPresence.get((reactionTarget ?? sheetMessage)?.senderUsername ?? '')?.avatar}
+                  role={(reactionTarget ?? sheetMessage)?.mine ? myRole : rolesByUsername.get((reactionTarget ?? sheetMessage)?.senderUsername ?? '')}
+                  secret={secret}
+                />
+              ) : null
+            }
+            reactions={(onHeight) => (
+              <ReactionPicker
+                inline
+                visible
+                anchor={menuAnchor}
+                onClose={closeHoldMenu}
+                onLayoutHeight={onHeight}
+                onPick={(emoji) => {
+                  const target = reactionTarget ?? sheetMessage;
+                  if (target) void reactTo(target, emoji);
+                  closeHoldMenu();
+                }}
+                mine={Boolean((reactionTarget ?? sheetMessage)?.mine)}
+              />
+            )}
+            actions={(onHeight) => (
+              <MessageActionSheet
+                inline
+                message={sheetMessage}
+                anchor={menuAnchor}
+                onLayoutHeight={onHeight}
+                pinned={Boolean(sheetMessage && pinned?.id === sheetMessage.id)}
+                allowCopy={true}
+                onReply={() => { if (sheetMessage) startReply(sheetMessage); closeHoldMenu(); }}
+                onCopy={() => { if (sheetMessage) void copyMessageText(sheetMessage.text ?? ''); closeHoldMenu(); }}
+                onEdit={() => { if (sheetMessage) startEdit(sheetMessage); closeHoldMenu(); }}
+                onDelete={() => { if (sheetMessage) confirmDelete(sheetMessage); closeHoldMenu(); }}
+                onPin={() => { void pinMessage(sheetMessage); closeHoldMenu(); }}
+                onRetry={() => { if (sheetMessage) void retryMessage(sheetMessage); closeHoldMenu(); }}
+                onClose={closeHoldMenu}
+              />
+            )}
           />
-
-        <MessageActionSheet
-          message={sheetMessage}
-          anchor={menuAnchor}
-          pinned={Boolean(sheetMessage && pinned?.id === sheetMessage.id)}
-          allowCopy={true}
-          onReply={() => { if (sheetMessage) startReply(sheetMessage); closeHoldMenu(); }}
-          onCopy={() => { if (sheetMessage) void copyMessageText(sheetMessage.text ?? ''); closeHoldMenu(); }}
-          onEdit={() => { if (sheetMessage) startEdit(sheetMessage); closeHoldMenu(); }}
-          onDelete={() => { if (sheetMessage) confirmDelete(sheetMessage); closeHoldMenu(); }}
-          onPin={() => { void pinMessage(sheetMessage); closeHoldMenu(); }}
-          onRetry={() => { if (sheetMessage) void retryMessage(sheetMessage); closeHoldMenu(); }}
-          onClose={closeHoldMenu}
-        />
         </Modal>
 
         <AttachmentsGallery visible={galleryOpen} messages={allMessages} onClose={() => setGalleryOpen(false)} />

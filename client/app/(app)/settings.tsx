@@ -57,6 +57,14 @@ const SECTION_ROWS: SectionRow[] = [
     keywords: ['уведомления', 'звук', 'звуки', 'вибрация', 'haptics', 'приглушённые', 'заявки', 'приглашения'],
   },
   {
+    key: 'calls',
+    icon: 'mic-outline',
+    title: 'Звонки и звук',
+    subtitle: 'Микрофон, шумо- и эхоподавление, усиление',
+    route: '/settings/calls',
+    keywords: ['звонки', 'микрофон', 'шумоподавление', 'эхоподавление', 'усиление', 'звук', 'громкость', 'эхо', 'шум'],
+  },
+  {
     key: 'appearance',
     icon: 'color-palette-outline',
     title: 'Внешний вид',

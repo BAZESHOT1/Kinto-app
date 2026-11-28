@@ -9,7 +9,7 @@
 const { withAndroidManifest } = require('@expo/config-plugins');
 
 const SERVICE_NAME = 'app.notifee.core.ForegroundService';
-const SERVICE_TYPES = 'connectedDevice|dataSync';
+const SERVICE_TYPES = 'connectedDevice|dataSync|microphone';
 
 module.exports = function withNotifeeForegroundService(config) {
   return withAndroidManifest(config, (mod) => {

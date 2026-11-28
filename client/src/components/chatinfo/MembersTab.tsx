@@ -17,6 +17,8 @@ export interface ChatMemberRow {
   username: string;
   displayName: string;
   role: string;
+  /** Персональное разрешение/запрет приглашать (null — по политике чата). */
+  inviteOverride?: 'allow' | 'deny' | null;
   /** Онлайн-узел участника (оранжевая обводка). */
   nodeOnline?: boolean;
   /** Онлайн-модуль участника (зелёная обводка). */
@@ -41,6 +43,7 @@ export function MembersTab({
   canManage,
   onChangeRole,
   onRemove,
+  onInviteOverride,
 }: {
   members: ChatMemberRow[];
   myUsername: string;
@@ -52,6 +55,8 @@ export function MembersTab({
   canManage?: boolean;
   onChangeRole?: (member: ChatMemberRow, role: MemberRole) => Promise<void>;
   onRemove?: (member: ChatMemberRow) => Promise<void>;
+  /** Разрешить / запретить конкретному участнику приглашать (null — по политике чата). */
+  onInviteOverride?: (member: ChatMemberRow, value: 'allow' | 'deny' | null) => Promise<void>;
 }) {
   const theme = useTheme();
   const reduced = useReducedMotion();
@@ -112,7 +117,7 @@ export function MembersTab({
   });
 
   const canEditMember = (m: ChatMemberRow) =>
-    Boolean(canManage && onChangeRole) && m.role !== 'owner' && m.username !== myUsername;
+    Boolean(canManage && (onChangeRole || onInviteOverride)) && m.role !== 'owner' && m.username !== myUsername;
 
   async function changeRole(role: MemberRole) {
     if (!actionMember || !onChangeRole || busyUser) return;
@@ -123,6 +128,20 @@ export function MembersTab({
       setActionMember(null);
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : 'Не удалось изменить роль');
+    } finally {
+      setBusyUser('');
+    }
+  }
+
+  async function setInvite(value: 'allow' | 'deny' | null) {
+    if (!actionMember || !onInviteOverride || busyUser) return;
+    setBusyUser(actionMember.username);
+    setError('');
+    try {
+      await onInviteOverride(actionMember, value);
+      setActionMember(null);
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : 'Не удалось изменить право приглашать');
     } finally {
       setBusyUser('');
     }
@@ -219,7 +238,7 @@ export function MembersTab({
       >
         {error ? <Text style={{ color: theme.danger, fontSize: 12.5, marginBottom: 8 }}>{error}</Text> : null}
         <View style={{ gap: 6 }}>
-          {ROLE_OPTIONS.filter((option) => option.role !== actionMember?.role).map((option) => (
+          {(onChangeRole ? ROLE_OPTIONS : []).filter((option) => option.role !== actionMember?.role).map((option) => (
             <Pressable
               key={option.role}
               onPress={() => void changeRole(option.role)}
@@ -250,6 +269,32 @@ export function MembersTab({
             </Pressable>
           ))}
         </View>
+        {onInviteOverride ? (
+          <View style={{ gap: 6, marginTop: 10 }}>
+            <Text style={{ color: theme.textSecondary, fontSize: 11.5, fontWeight: '700', paddingHorizontal: 2 }}>
+              Приглашения{actionMember?.inviteOverride === 'allow' ? ' · разрешено' : actionMember?.inviteOverride === 'deny' ? ' · запрещено' : ' · по политике чата'}
+            </Text>
+            {([
+              { value: 'allow' as const, label: 'Разрешить приглашать в группу', icon: 'person-add-outline' as const },
+              { value: 'deny' as const, label: 'Запретить приглашать в группу', icon: 'close-circle-outline' as const },
+              { value: null, label: 'Как в настройках группы', icon: 'refresh-outline' as const },
+            ]).filter((o) => o.value !== (actionMember?.inviteOverride ?? null)).map((o) => (
+              <Pressable
+                key={String(o.value)}
+                onPress={() => void setInvite(o.value)}
+                disabled={Boolean(busyUser)}
+                accessibilityRole="button"
+                accessibilityLabel={o.label}
+                style={({ pressed }) => [styles.optionRow, { borderColor: theme.line, backgroundColor: pressed ? theme.surfacePressed : theme.surface, opacity: busyUser ? 0.55 : 1 }]}
+              >
+                <View style={[styles.optionIcon, { backgroundColor: theme.accentSoft }]}>
+                  <Ionicons name={o.icon} size={16} color={theme.accent} />
+                </View>
+                <Text style={{ color: theme.textPrimary, fontSize: 13.5, fontWeight: '600', flex: 1 }}>{o.label}</Text>
+              </Pressable>
+            ))}
+          </View>
+        ) : null}
         <View style={{ marginTop: 10 }}>
           <Btn
             title="Исключить из чата"
