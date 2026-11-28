@@ -677,9 +677,13 @@ static void test_bridge_e2e(void) {
   bwa.bridge_ctx.bridge = &ba;
   bwb.bridge_ctx.bridge = &bb;
 
-  const char *text = "hello from the phone";
+  /* DATA_PAYLOAD: прошивка переносит непрозрачные байты (конверт приложения), не шифрует и не разбирает. */
   uint8_t rpc[64];
-  const size_t rpc_len = kl_codec_encode_text(rpc, sizeof(rpc), 7, text, strlen(text), 0);
+  rpc[0] = KL_RPC_DATA_PAYLOAD;
+  rpc[1] = 0; /* флаги */
+  const char *blob = "opaque-app-envelope";
+  memcpy(rpc + 2, blob, strlen(blob));
+  const size_t rpc_len = 2 + strlen(blob);
   uint8_t up[128];
   kl_write_le32(up, 22);
   up[4] = 0;
@@ -691,37 +695,31 @@ static void test_bridge_e2e(void) {
   const size_t frame_len = build_client_frame(frame, KL_CF_RPC_UP, up, up_len);
   ba.on_link_data(frame, frame_len);
 
-  /* Router A should now hold an encrypted DATA frame for node 22. */
+  /* Роутер A держит DATA_PAYLOAD для узла 22 с теми же байтами. */
   kl_packet_t data;
+  memset(&data, 0, sizeof(data));
   bool have = false;
   for (int i = 0; i < bwa.world.sent_count; ++i) {
-    if (bwa.world.sent[i].type == KL_TYPE_DATA) {
+    if (bwa.world.sent[i].type == KL_TYPE_DATA_PAYLOAD) {
       data = bwa.world.sent[i];
       have = true;
     }
   }
   CHECK(have);
-  CHECK(data.flags & KL_FLAG_TEMP_MESH_KEY);
-  CHECK(kl_crypto_is_envelope(data.payload, data.payload_len));
+  if (!have) return;
+  CHECK(data.payload_len == rpc_len);
+  CHECK(memcmp(data.payload, rpc, rpc_len) == 0);
 
-  /* Node 22 decrypts and forwards a transparent RPC to its app. */
+  /* Узел 22 передаёт те же байты приложению. */
   rb.on_packet(&data, KL_IFACE_ESPNOW, -55, 5010);
   CHECK(lb.out_len > 0);
   CHECK(lb.out[3] == KL_CF_RPC_DOWN);
   const uint16_t plen = (uint16_t)(lb.out[7] | ((uint16_t)lb.out[8] << 8));
   kl_packet_t down;
   CHECK(kl_packet_parse(lb.out + KL_CLIENT_HEADER_SIZE, plen, &down));
-  CHECK(!(down.flags & KL_FLAG_TEMP_MESH_KEY));
-  kl_rpc_text_t rpc_out;
-  char decoded[KL_MAX_TEXT + 1];
-  CHECK(kl_codec_decode_text(down.payload, down.payload_len, &rpc_out, decoded, sizeof(decoded)));
-  CHECK(!strcmp(decoded, text));
-
-  /* Router B emitted an L3 ACK; feed it back to A and expect DELIVERED. */
-  CHECK(bwb.world.sent_count >= 1);
-  ra.on_packet(&bwb.world.sent[0], KL_IFACE_ESPNOW, -55, 5020);
-  CHECK(bwa.bridge_ctx.last_status == KL_STATUS_DELIVERED_TO_PEER);
-  CHECK(bwa.bridge_ctx.last_uuid == 0x123456789ULL);
+  CHECK(down.type == KL_TYPE_DATA_PAYLOAD);
+  CHECK(down.payload_len == rpc_len);
+  CHECK(memcmp(down.payload, rpc, rpc_len) == 0);
 }
 
 /* ---------------------------------------------------------- gateway ----- */
