@@ -10,7 +10,7 @@ import { Avatar } from '../components/Avatar';
 import type { CallParticipantView } from './room';
 
 /** Горизонтальный ползунок 0…max (по нажатию и перетаскиванию). */
-function VolumeSlider({ value, max = 2, onChange }: { value: number; max?: number; onChange: (v: number) => void }) {
+export function VolumeSlider({ value, max = 2, onChange }: { value: number; max?: number; onChange: (v: number) => void }) {
   const theme = useTheme();
   const [width, setWidth] = React.useState(1);
   const setFrom = (e: GestureResponderEvent) => {

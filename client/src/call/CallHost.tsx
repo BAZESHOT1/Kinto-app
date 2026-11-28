@@ -16,6 +16,7 @@ import { startMeshVoice, type MeshVoiceHandle } from './meshVoice';
 import { supportsSpeakerToggle } from './audioSession';
 import { startCallKeepAlive } from './callBackground';
 import { ParticipantSheet } from './ParticipantSheet';
+import { CallAudioSheet } from './CallAudioSheet';
 import { chooseCallChannel, type ChannelChoice } from './meshLinkState';
 import {
   joinCallRoom,
@@ -101,6 +102,7 @@ function ActiveCall({ session }: { session: CallSession }) {
   const [speaker, setSpeaker] = React.useState(Platform.OS !== 'web'); // на смартфонах по умолчанию громкая связь; выключение — разговорный динамик
   const [seconds, setSeconds] = React.useState(0);
   const [selectedId, setSelectedId] = React.useState<string | null>(null);
+  const [audioOpen, setAudioOpen] = React.useState(false);
   // Администрация группы (владелец / админ / модератор) может мутить участников у всех.
   const [canModerate, setCanModerate] = React.useState(false);
   React.useEffect(() => {
@@ -398,6 +400,15 @@ function ActiveCall({ session }: { session: CallSession }) {
       >
         <Ionicons name="chevron-down" size={22} color={theme.textPrimary} />
       </Pressable>
+      <Pressable
+        onPress={() => setAudioOpen(true)}
+        accessibilityRole="button"
+        accessibilityLabel="Звук звонка: микрофон, громкость, подавление шума"
+        style={[styles.audioBtn, { top: insets.top + 12, backgroundColor: theme.surfaceElevated }]}
+      >
+        <Ionicons name="options-outline" size={22} color={theme.textPrimary} />
+      </Pressable>
+      <CallAudioSheet visible={audioOpen} onClose={() => setAudioOpen(false)} />
       <View style={styles.header}>
         <Text style={{ color: theme.textPrimary, fontSize: 22, fontWeight: '800' }} numberOfLines={1}>{title}</Text>
         <Text style={{ color: phase === 'reconnecting' || error ? theme.warning : theme.accent, fontSize: 16, marginTop: 6 }}>{status}</Text>
@@ -477,6 +488,7 @@ const styles = StyleSheet.create({
   hidden: { display: 'none' },
   bar: { position: 'absolute', left: 0, right: 0, height: 10, backgroundColor: '#22C55E', zIndex: 9999, elevation: 9999, alignItems: 'center', justifyContent: 'center' },
   barText: { color: '#04210F', fontSize: 9, lineHeight: 10, fontWeight: '800', maxWidth: '90%' },
+  audioBtn: { position: 'absolute', right: 16, width: 40, height: 40, borderRadius: 20, alignItems: 'center', justifyContent: 'center', zIndex: 2 },
   minBtn: { position: 'absolute', left: 16, width: 40, height: 40, borderRadius: 20, alignItems: 'center', justifyContent: 'center', zIndex: 2 },
   header: { alignItems: 'center', paddingHorizontal: 24, paddingTop: 12 },
   grid: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'center', padding: 24, gap: 18 },

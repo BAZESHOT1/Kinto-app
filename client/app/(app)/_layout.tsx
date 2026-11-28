@@ -90,7 +90,6 @@ function AppStack() {
             нативный жест назад от левого края (iOS edge swipe). */}
         <Stack.Screen name="settings/params" options={backGesture} />
         <Stack.Screen name="settings/notifications" options={backGesture} />
-        <Stack.Screen name="settings/calls" options={backGesture} />
         <Stack.Screen name="settings/appearance" options={backGesture} />
         <Stack.Screen name="settings/network" options={backGesture} />
         <Stack.Screen name="settings/security" options={backGesture} />

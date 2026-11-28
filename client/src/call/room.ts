@@ -5,7 +5,8 @@
 import { Platform } from 'react-native';
 import type { Participant, RemoteTrack, ConnectionState as LkConnectionState } from 'livekit-client';
 import { createNoiseProcessor } from './noiseSuppression';
-import { getAudioPrefs, onAudioPrefsChanged } from './audioPrefs';
+import { effectiveAgc, getAudioPrefs, onAudioPrefsChanged } from './audioPrefs';
+import { getSavedVolume, saveVolume } from './callVolumes';
 import { ensureCallGlobals, guarded } from './globals';
 import { setSpeakerphone, startCallAudioSession, stopCallAudioSession } from './audioSession';
 
@@ -51,7 +52,7 @@ const view = (p: Participant, local: boolean): CallParticipantView => ({
   speaking: p.isSpeaking,
   muted: !p.isMicrophoneEnabled,
   level: p.audioLevel ?? 0,
-  volume: volumes.get(p.identity) ?? 1,
+  volume: volumes.get(p.identity) ?? getSavedVolume(p.identity) ?? 1,
   modMuted: p.permissions ? p.permissions.canPublish === false : false,
 });
 
@@ -76,7 +77,7 @@ export async function joinCallRoom(opts: JoinOptions): Promise<CallRoomHandle> {
     audioCaptureDefaults: {
       echoCancellation: prefs.echoCancellation,
       noiseSuppression: prefs.noiseSuppression,
-      autoGainControl: prefs.autoGainControl,
+      autoGainControl: effectiveAgc(prefs, Platform.OS !== 'web'),
       voiceIsolation: prefs.noiseSuppression,
       channelCount: 1,
       sampleRate: 48000,
@@ -113,12 +114,12 @@ export async function joinCallRoom(opts: JoinOptions): Promise<CallRoomHandle> {
     .on(RoomEvent.TrackUnsubscribed, (track) => { detach(track); emit(); })
     .on(RoomEvent.ParticipantConnected, (p) => {
       // Громкость, выставленная ранее, действует и после переподключения собеседника.
-      const v = volumes.get(p.identity);
+      const v = volumes.get(p.identity) ?? getSavedVolume(p.identity);
       if (v !== undefined) (p as unknown as { setVolume: (x: number) => void }).setVolume(v);
       emit();
     })
     .on(RoomEvent.TrackSubscribed, (track, _pub, p) => {
-      const v = volumes.get(p.identity);
+      const v = volumes.get(p.identity) ?? getSavedVolume(p.identity);
       if (v !== undefined && track.kind === Track.Kind.Audio) (p as unknown as { setVolume: (x: number) => void }).setVolume(v);
     })
     .on(RoomEvent.ParticipantPermissionsChanged, (_prev, p) => {
@@ -182,7 +183,7 @@ export async function joinCallRoom(opts: JoinOptions): Promise<CallRoomHandle> {
         .restartTrack({
           echoCancellation: next.echoCancellation,
           noiseSuppression: next.noiseSuppression,
-          autoGainControl: next.autoGainControl,
+          autoGainControl: effectiveAgc(next, Platform.OS !== 'web'),
           voiceIsolation: next.noiseSuppression,
           channelCount: 1,
           sampleRate: 48000,
@@ -226,6 +227,7 @@ export async function joinCallRoom(opts: JoinOptions): Promise<CallRoomHandle> {
     setParticipantVolume: (id, volume) => {
       const v = Math.max(0, Math.min(2, volume));
       volumes.set(id, v);
+      saveVolume(id, v);
       const p = room.remoteParticipants.get(id);
       if (p) (p as unknown as { setVolume: (x: number) => void }).setVolume(v);
       emit();

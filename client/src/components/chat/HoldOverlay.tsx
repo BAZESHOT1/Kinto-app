@@ -97,7 +97,7 @@ export function HoldOverlay({
         ) : NATIVE_BLUR_OK ? (
           <BlurView intensity={45} tint={theme.dark ? 'dark' : 'light'} style={StyleSheet.absoluteFill} pointerEvents="none" />
         ) : (
-          <View pointerEvents="none" style={[StyleSheet.absoluteFill, { backgroundColor: fillDim }]} />
+          <View pointerEvents="none" style={[StyleSheet.absoluteFill, { backgroundColor: theme.dark ? 'rgba(0,0,0,0.82)' : 'rgba(255,255,255,0.8)' }]} />
         )}
       </Pressable>
 

@@ -10,7 +10,7 @@ export type AudioPrefs = {
   noiseSuppression: boolean;
   echoCancellation: boolean;
   autoGainControl: boolean;
-  /** Усиление микрофона (множитель 0.5…3). Работает в цепочке обработки на web/Windows. */
+  /** Громкость микрофона 0…2 (0–200 %). На web/Windows — усиление в цепочке обработки; на телефонах выше 1.25 включается системное AGC. */
   micGain: number;
   /** Идентификатор выбранного микрофона (web/Windows); пусто — по умолчанию. */
   micDeviceId: string;
@@ -64,7 +64,7 @@ void Promise.resolve(kv.get(KEY))
       if (typeof parsed.noiseSuppression === 'boolean') patch.noiseSuppression = parsed.noiseSuppression;
       if (typeof parsed.echoCancellation === 'boolean') patch.echoCancellation = parsed.echoCancellation;
       if (typeof parsed.autoGainControl === 'boolean') patch.autoGainControl = parsed.autoGainControl;
-      if (typeof parsed.micGain === 'number' && parsed.micGain >= 0.25 && parsed.micGain <= 4) patch.micGain = parsed.micGain;
+      if (typeof parsed.micGain === 'number' && parsed.micGain >= 0 && parsed.micGain <= 2) patch.micGain = parsed.micGain;
       if (typeof parsed.micDeviceId === 'string') patch.micDeviceId = parsed.micDeviceId;
       if (typeof parsed.voiceChain === 'boolean') patch.voiceChain = parsed.voiceChain;
       useAudioPrefs.setState({ ...patch, loaded: true });
@@ -73,3 +73,8 @@ void Promise.resolve(kv.get(KEY))
     }
   })
   .catch(() => undefined);
+
+/** Автоусиление с учётом ползунка: на телефонах «усиление» микрофона = системное AGC (ручного усиления в WebRTC нет). */
+export function effectiveAgc(prefs: AudioPrefs, native: boolean): boolean {
+  return prefs.autoGainControl || (native && prefs.micGain > 1.25);
+}

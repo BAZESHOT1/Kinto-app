@@ -11,9 +11,7 @@ import { getAudioPrefs, useAudioPrefs } from './audioPrefs';
 
 export function createNoiseProcessor(): TrackProcessor<Track.Kind.Audio> | null {
   if (typeof window === 'undefined' || typeof AudioContext === 'undefined') return null;
-  const prefs0 = getAudioPrefs();
-  // Цепочка выключена в настройках, а усиление не нужно — звук идёт как есть.
-  if (!prefs0.voiceChain && prefs0.micGain === 1) return null;
+  // Цепочка создаётся всегда: в ней живёт ползунок громкости микрофона, который меняется и во время звонка.
   let rnnoise = false;
   try {
     rnnoise = window.localStorage.getItem('sg:rnnoise') === '1' && typeof AudioWorkletNode !== 'undefined';
@@ -47,15 +45,28 @@ export function createNoiseProcessor(): TrackProcessor<Track.Kind.Audio> | null 
       air.type = 'highshelf'; air.frequency.value = 8000; air.gain.value = 1.5;
       const comp = ctx.createDynamicsCompressor();
       comp.threshold.value = -26; comp.knee.value = 14; comp.ratio.value = 3; comp.attack.value = 0.006; comp.release.value = 0.16;
-      const makeup = ctx.createGain();
-      const baseGain = voice ? 1.6 : 1; // ≈ +4 дБ после компрессии (AGC выключен)
-      makeup.gain.value = baseGain * getAudioPrefs().micGain;
-      unsubscribe = useAudioPrefs.subscribe((st) => { makeup.gain.value = baseGain * st.micGain; });
       const limiter = ctx.createDynamicsCompressor();
       limiter.threshold.value = -3; limiter.knee.value = 0; limiter.ratio.value = 20; limiter.attack.value = 0.001; limiter.release.value = 0.08;
+      // Компенсация после компрессии (+4 дБ) — только в студийной цепочке.
+      const makeup = ctx.createGain();
+      makeup.gain.value = voice ? 1.6 : 1;
+      // Громкость микрофона (0–200 %) — ПОСЛЕДНЯЯ ступень: масштабирует итоговый сигнал, а не упирается в компрессор.
+      // Мягкое насыщение (tanh) вместо жёсткого клиппинга при усилении выше 100 %.
+      const gain = ctx.createGain();
+      gain.gain.value = getAudioPrefs().micGain;
+      unsubscribe = useAudioPrefs.subscribe((st) => { gain.gain.value = st.micGain; });
+      const sat = ctx.createWaveShaper();
+      const curve = new Float32Array(1024);
+      for (let i = 0; i < curve.length; i += 1) {
+        const x = (i / (curve.length - 1)) * 2 - 1;
+        curve[i] = Math.tanh(x * 1.4) / Math.tanh(1.4);
+      }
+      sat.curve = curve;
+      sat.oversample = '2x';
       if (voice) chain.push(hp, boom, presence, air, comp);
       chain.push(makeup);
       if (voice) chain.push(limiter);
+      chain.push(gain, sat);
       const dest = ctx.createMediaStreamDestination();
       let prev: AudioNode = source;
       for (const n of chain) { prev.connect(n); prev = n; }
