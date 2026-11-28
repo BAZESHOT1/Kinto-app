@@ -15,10 +15,10 @@ export async function startCallAudioSession(): Promise<void> {
   const { AndroidAudioTypePresets, AudioSession } = lk();
   await AudioSession.configureAudio({
     android: {
-      preferredOutputList: ['earpiece', 'speaker', 'bluetooth', 'headset'],
+      preferredOutputList: ['speaker', 'earpiece', 'bluetooth', 'headset'],
       audioTypeOptions: AndroidAudioTypePresets.communication,
     },
-    ios: { defaultOutput: 'earpiece' },
+    ios: { defaultOutput: 'speaker' },
   });
   await AudioSession.startAudioSession();
 }

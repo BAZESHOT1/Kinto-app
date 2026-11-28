@@ -70,7 +70,7 @@ export function useLayoutInsets(): LayoutInsets {
   const web = useWebInsets();
   if (Platform.OS !== 'web') return native;
   // Берём большее из двух источников: любой из них может оказаться нулевым.
-  const fallbackTop = web.top === 0 && native.top === 0 ? iosPwaTopFallback() : 0;
+  const fallbackTop = 0; // со статус-баром style=black окно начинается под ним: компенсация не нужна
   return {
     top: Math.max(web.top, native.top, fallbackTop),
     right: Math.max(web.right, native.right),

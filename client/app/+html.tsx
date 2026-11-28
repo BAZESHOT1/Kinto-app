@@ -16,7 +16,7 @@ export default function Root({ children }: PropsWithChildren) {
           content="Kinto — приватный мессенджер на рое узлов: чаты, каналы, секретные диалоги и свои устройства хранения."
         />
         <meta name="apple-mobile-web-app-capable" content="yes" />
-        <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+        <meta name="apple-mobile-web-app-status-bar-style" content="black" />
         <meta name="apple-mobile-web-app-title" content="Kinto" />
         <meta name="mobile-web-app-capable" content="yes" />
         <title>Kinto</title>

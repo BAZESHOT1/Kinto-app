@@ -16,6 +16,9 @@ import { motion } from '../../theme/motion';
 export const QUICK_REACTIONS = ['❤️', '👍', '😂', '😮', '😢', '🔥', '🙏'] as const;
 
 /** Полный набор — раскрывается шевроном. */
+/** Текст самого меню не выделяется (выделяется только текст сообщения). */
+const NO_SELECT = { userSelect: 'none', WebkitUserSelect: 'none', WebkitTouchCallout: 'none' } as never;
+
 const MORE_REACTIONS = [
   '👍', '👎', '❤️', '🔥', '🥰', '👏', '😁', '🤔',
   '🤯', '😱', '🤬', '😢', '🎉', '🤩', '🤮', '💩',
@@ -70,7 +73,7 @@ export function ReactionPicker({
   const border = theme.dark ? 'rgba(255,255,255,0.10)' : 'rgba(0,0,0,0.06)';
 
   return (
-    <View pointerEvents="box-none" style={StyleSheet.absoluteFill}>
+    <View pointerEvents="box-none" style={[StyleSheet.absoluteFill, NO_SELECT]}>
       <MotiView
         from={{ opacity: 0, scale: reduced ? 1 : 0.86, translateY: reduced ? 0 : 10 }}
         animate={{ opacity: 1, scale: 1, translateY: 0 }}

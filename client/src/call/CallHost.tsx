@@ -64,7 +64,7 @@ function ActiveCall({ session }: { session: CallSession }) {
   const [phase, setPhase] = React.useState<CallPhase | 'starting' | 'ended'>('starting');
   const [participants, setParticipants] = React.useState<CallParticipantView[]>([]);
   const [muted, setMuted] = React.useState(false);
-  const [speaker, setSpeaker] = React.useState(false);
+  const [speaker, setSpeaker] = React.useState(Platform.OS !== 'web'); // на смартфонах по умолчанию громкая связь; выключение — разговорный динамик
   const [seconds, setSeconds] = React.useState(0);
   const [error, setError] = React.useState('');
   const roomRef = React.useRef<CallRoomHandle | null>(null);
@@ -72,6 +72,7 @@ function ActiveCall({ session }: { session: CallSession }) {
   const callIdRef = React.useRef('');
   const connectedAtRef = React.useRef(0);
   const closedRef = React.useRef(false);
+  const speakerRef = React.useRef(Platform.OS !== 'web');
   const isDirect = chatType === 'direct';
   const isDirectRef = React.useRef(isDirect);
   const sawPeerRef = React.useRef(false);
@@ -148,6 +149,8 @@ function ActiveCall({ session }: { session: CallSession }) {
           return;
         }
         roomRef.current = room;
+        // Применяем выбранный режим вывода сразу после подключения (по умолчанию — громкая связь).
+        void room.setSpeaker(speakerRef.current);
       } catch (e) {
         if (cancelled) return;
         const code = e instanceof Error ? e.message : String(e);
@@ -204,6 +207,7 @@ function ActiveCall({ session }: { session: CallSession }) {
   const toggleSpeaker = async () => {
     const next = !speaker;
     setSpeaker(next);
+    speakerRef.current = next;
     await roomRef.current?.setSpeaker(next);
   };
 
@@ -283,7 +287,7 @@ function ActiveCall({ session }: { session: CallSession }) {
           <Pressable
             onPress={() => void toggleSpeaker()}
             accessibilityRole="button"
-            accessibilityLabel="Громкая связь"
+            accessibilityLabel={speaker ? "Выключить громкую связь (разговорный динамик)" : "Включить громкую связь"}
             style={[styles.btn, { backgroundColor: speaker ? theme.textPrimary : theme.surfaceElevated }]}
           >
             <Ionicons name="volume-high" size={26} color={speaker ? theme.background : theme.textPrimary} />

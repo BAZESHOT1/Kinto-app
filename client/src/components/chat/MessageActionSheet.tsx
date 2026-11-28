@@ -7,6 +7,9 @@ import { MotiView } from 'moti';
 import { useTheme } from '../../theme/useTheme';
 import type { ViewMessage } from '../../data/messaging';
 
+/** Текст самого меню не выделяется (выделяется только текст сообщения). */
+const NO_SELECT = { userSelect: 'none', WebkitUserSelect: 'none', WebkitTouchCallout: 'none' } as never;
+
 const hhmm = (d: Date) => d.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' });
 
 /** «сегодня в 21:39», «вчера в 21:39», «12 ноября в 21:39». */
@@ -107,7 +110,7 @@ export function MessageActionSheet({
   const sub = theme.dark ? 'rgba(235,235,245,0.62)' : 'rgba(60,60,67,0.6)';
 
   return (
-    <View pointerEvents="box-none" style={styles.root}>
+    <View pointerEvents="box-none" style={[styles.root, NO_SELECT]}>
       <MotiView
         from={{ opacity: 0, scale: 0.88, translateY: -8 }}
         animate={{ opacity: 1, scale: 1, translateY: 0 }}

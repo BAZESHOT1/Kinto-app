@@ -2259,6 +2259,7 @@ function ChatScreen({ forcedId }: { forcedId?: string } = {}) {
               </MotiView>
             </Glass>
           </Pressable>
+          <Glass radius={26} fill={GLASS_FILL_BUTTON} intensity={72} style={{ flex: 1, maxWidth: contentWidth.chat }}>
           <TextInput
             ref={inputRef}
             value={text}
@@ -2295,12 +2296,13 @@ function ChatScreen({ forcedId }: { forcedId?: string } = {}) {
               {
                 backgroundColor: 'transparent', // поле ввода прозрачное — фон чата просвечивает
                 color: theme.textPrimary,
-                borderColor: editing ? theme.accent : theme.dark ? 'rgba(255,255,255,0.10)' : 'rgba(0,0,0,0.08)',
+                borderWidth: 0,
                 maxWidth: contentWidth.chat,
                 height: inputHeight,
               },
             ]}
           />
+          </Glass>
           {!text.trim() && !editing && pendingFiles.length === 0 ? (
             <VoiceRecorder
               onSend={(file) => onAttach(file)}
@@ -2319,18 +2321,18 @@ function ChatScreen({ forcedId }: { forcedId?: string } = {}) {
               accessibilityRole="button"
               accessibilityLabel={editing ? 'Сохранить изменения' : 'Отправить'}
               style={({ pressed }) => [
-                styles.send,
                 {
-                  backgroundColor: theme.accent,
                   opacity: !canCompose || (!text.trim() && pendingFiles.length === 0) || (sending && Boolean(editing)) ? 0.45 : pressed ? 0.85 : 1,
                 },
               ]}
             >
+              <Glass radius={26} fill={theme.accent} borderColor={theme.accent} intensity={72} style={styles.send}>
               {editing ? (
                 <Ionicons name="checkmark" size={25} color={theme.onAccent} />
               ) : (
                 <Ionicons name="arrow-up" size={26} color={theme.onAccent} />
               )}
+              </Glass>
             </Pressable>
           </Animated.View>
           ) : null}
@@ -2477,6 +2479,27 @@ function HoldBackdrop({ anchor, dark, onClose }: { anchor: { x: number; y: numbe
     { left: a.x + a.w, top: a.y, width: Math.max(0, W - a.x - a.w), height: a.h },
   ];
   const list = anchor ? strips : [{ left: 0, top: 0, width: W, height: H }];
+  // Web: одно размытие на весь экран с маской-«окном» со скруглёнными углами по форме пузыря (а не квадрат).
+  if (Platform.OS === 'web' && anchor) {
+    const r = Math.min(22, a.w / 2, a.h / 2);
+    const { x, y, w, h } = a;
+    const d = `M0 0H${W}V${H}H0Z M${x + r} ${y}H${x + w - r}A${r} ${r} 0 0 1 ${x + w} ${y + r}V${y + h - r}A${r} ${r} 0 0 1 ${x + w - r} ${y + h}H${x + r}A${r} ${r} 0 0 1 ${x} ${y + h - r}V${y + r}A${r} ${r} 0 0 1 ${x + r} ${y}Z`;
+    const svg = `<svg xmlns='http://www.w3.org/2000/svg' width='${W}' height='${H}'><path fill-rule='evenodd' d='${d}'/></svg>`;
+    const mask = `url("data:image/svg+xml,${encodeURIComponent(svg)}")`;
+    return (
+      <Pressable onPress={onClose} accessibilityRole="button" accessibilityLabel="Закрыть меню сообщения" style={StyleSheet.absoluteFill}>
+        {React.createElement('div', {
+          style: {
+            position: 'absolute', left: 0, top: 0, right: 0, bottom: 0, pointerEvents: 'none',
+            backdropFilter: 'blur(18px)', WebkitBackdropFilter: 'blur(18px)',
+            background: dark ? 'rgba(0,0,0,0.38)' : 'rgba(255,255,255,0.30)',
+            maskImage: mask, WebkitMaskImage: mask, maskRepeat: 'no-repeat', WebkitMaskRepeat: 'no-repeat',
+            maskSize: '100% 100%', WebkitMaskSize: '100% 100%',
+          },
+        })}
+      </Pressable>
+    );
+  }
   return (
     <>
       {list.map((r, i) => (

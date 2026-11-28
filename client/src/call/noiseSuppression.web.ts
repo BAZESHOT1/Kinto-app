@@ -7,6 +7,14 @@ import type { TrackProcessor, Track } from 'livekit-client';
 
 export function createNoiseProcessor(): TrackProcessor<Track.Kind.Audio> | null {
   if (typeof window === 'undefined' || typeof AudioWorkletNode === 'undefined') return null;
+  // RNNoise отключён по умолчанию: после его добавления пропадал звук в обе стороны (AudioContext мог оставаться
+  // в suspended и отдавать тишину). Базовое шумоподавление браузера/WebRTC (noiseSuppression) работает всегда.
+  // Включение для проверки: localStorage.setItem('sg:rnnoise', '1').
+  try {
+    if (window.localStorage.getItem('sg:rnnoise') !== '1') return null;
+  } catch {
+    return null;
+  }
   let ctx: AudioContext | null = null;
   let node: AudioWorkletNode | null = null;
   let source: MediaStreamAudioSourceNode | null = null;
@@ -17,6 +25,7 @@ export function createNoiseProcessor(): TrackProcessor<Track.Kind.Audio> | null 
     async init(opts: { track: MediaStreamTrack }) {
       // RNNoise работает на 48 кГц.
       ctx = new AudioContext({ sampleRate: 48000 });
+      await ctx.resume().catch(() => undefined);
       await ctx.audioWorklet.addModule('/rnnoise-worklet.js');
       source = ctx.createMediaStreamSource(new MediaStream([opts.track]));
       node = new AudioWorkletNode(ctx, 'NoiseSuppressorWorklet');

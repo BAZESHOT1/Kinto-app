@@ -349,8 +349,8 @@ export function VoiceRecorder({
       >
         <MotiView animate={{ scale: phase === 'holding' ? 1.25 : 1 }} transition={{ type: 'spring', damping: 14, stiffness: 260 }}>
           <Glass
-            transparent={!recording}
             radius={26}
+            intensity={72}
             fill={recording ? theme.accent : GLASS_FILL_BUTTON}
             borderColor={recording ? theme.accent : undefined}
             style={styles.btn}
