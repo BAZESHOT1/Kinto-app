@@ -41,8 +41,8 @@ void kl_config_defaults(kl_config_t *cfg) {
   cfg->lora.dio1 = 2;
   cfg->lora.busy = 10;
   cfg->lora.freq_mhz = 869.525f;
-  cfg->lora.sf = 7; /* SF7: в ~3 раза быстрее SF9 */
-  cfg->lora.bw_khz = 125.0f;
+  cfg->lora.sf = 7; /* сеть: SF7 / BW250 / CR4/5 */
+  cfg->lora.bw_khz = 250.0f;
   cfg->lora.cr = 5;
   cfg->lora.preamble = 8;
   cfg->lora.power_dbm = 17;
@@ -97,9 +97,11 @@ bool kl_config_validate(kl_config_t *cfg) {
     cfg->station_presence_ms = KL_DEFAULT_STATION_PRESENCE_MS;
   }
   if (cfg->gw_beacon_interval_ms < 5000) cfg->gw_beacon_interval_ms = 5000;
-  if (cfg->lora.sf < 6 || cfg->lora.sf > 12) cfg->lora.sf = 7;
-  if (cfg->lora.cr < 5 || cfg->lora.cr > 8) cfg->lora.cr = 5;
-  if (cfg->lora.bw_khz <= 0) cfg->lora.bw_khz = 125.0f;
+  /* Параметры модуляции единые для всей сети (иначе узлы не слышат друг друга): SF7 / BW250 / CR4/5.
+   * Старые сохранённые конфигурации (SF9/BW125) принудительно переводятся на них. */
+  cfg->lora.sf = 7;
+  cfg->lora.bw_khz = 250.0f;
+  cfg->lora.cr = 5;
   if (cfg->lora.freq_mhz <= 0) cfg->lora.freq_mhz = 869.525f;
   if (cfg->lora.max_airtime_ms_per_min == 0) cfg->lora.max_airtime_ms_per_min = 36000;
   if (cfg->lora_low_watermark < 50 || cfg->lora_low_watermark > 95) cfg->lora_low_watermark = 70;

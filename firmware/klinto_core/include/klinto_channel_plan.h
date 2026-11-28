@@ -21,7 +21,7 @@ enum kl_plan_band_t : uint8_t {
 struct kl_channel_plan_entry_t {
   uint8_t wifi_channel;    /* 1..13 */
   uint32_t lora_freq_hz;   /* центр подканала */
-  uint16_t lora_bw_khz;    /* 125 */
+  uint16_t lora_bw_khz;    /* 250 */
   uint8_t lora_sync_word;  /* уникален для соты */
   uint8_t lora_sf;         /* 7 */
 };

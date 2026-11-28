@@ -103,8 +103,8 @@ arduino-cli lib install LoRa@0.8.0
 #define KL_LORA_CHIP_SX1262 1
 #define KL_LORA_CHIP_ID 1
 #define KL_LORA_FREQ 869.525
-#define KL_LORA_SF 9
-#define KL_LORA_BW 125.0
+#define KL_LORA_SF 7
+#define KL_LORA_BW 250.0
 #define KL_LORA_CR 5
 #define KL_LORA_SYNC 0x12
 #define KL_LORA_POWER 17

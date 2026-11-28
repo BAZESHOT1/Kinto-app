@@ -13,7 +13,26 @@ export type IncomingCall = {
   receivedAt: number;
 };
 
+/** Параметры звонка, которым владеет глобальный CallHost (звонок живёт, пока экран свёрнут). */
+export type CallSession = {
+  key: string;
+  chatId: string;
+  chatType: string;
+  joinId: string;
+  title: string;
+  mesh: boolean;
+};
+
 type CallStoreState = {
+  /** Текущий звонок (полноэкранный или свёрнутый в зелёную полосу). */
+  session: CallSession | null;
+  minimized: boolean;
+  /** Момент соединения (мс) — для таймера в свёрнутой полосе. */
+  connectedAt: number | null;
+  openCall: (session: Omit<CallSession, 'key'>) => void;
+  setMinimized: (minimized: boolean) => void;
+  setConnectedAt: (at: number | null) => void;
+  closeCall: () => void;
   /** Входящий звонок, на который пользователь ещё не ответил. */
   incoming: IncomingCall | null;
   /** Идентификатор звонка, в котором пользователь сейчас участвует. */
@@ -25,6 +44,17 @@ type CallStoreState = {
 };
 
 export const useCallStore = create<CallStoreState>((set, get) => ({
+  session: null,
+  minimized: false,
+  connectedAt: null,
+  openCall: (session) => {
+    // Уже идёт звонок — просто разворачиваем его (повторный запуск из чата не создаёт второй).
+    if (get().session) { set({ minimized: false }); return; }
+    set({ session: { ...session, key: `${Date.now()}` }, minimized: false, connectedAt: null });
+  },
+  setMinimized: (minimized) => set({ minimized }),
+  setConnectedAt: (connectedAt) => set({ connectedAt }),
+  closeCall: () => set({ session: null, minimized: false, connectedAt: null }),
   incoming: null,
   activeCallId: null,
   setIncoming: (incoming) => set({ incoming }),

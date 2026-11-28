@@ -76,10 +76,10 @@
 #define KL_LORA_FREQ 869.525f
 #endif
 #ifndef KL_LORA_SF
-#define KL_LORA_SF 9
+#define KL_LORA_SF 7
 #endif
 #ifndef KL_LORA_BW
-#define KL_LORA_BW 125.0f
+#define KL_LORA_BW 250.0f
 #endif
 #ifndef KL_LORA_CR
 #define KL_LORA_CR 5

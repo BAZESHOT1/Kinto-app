@@ -222,12 +222,20 @@ export function registerWebPush(
   session: WebPushSession | null | undefined,
 ): Promise<WebPushCleanup> {
   if (registrationPromise) return registrationPromise;
-  registrationPromise = doRegisterWebPush(session).then((stop) => () => {
-    stop();
-    registrationPromise = null;
-  }).catch((e) => {
-    registrationPromise = null;
+  const current = doRegisterWebPush(session).then((stop) => {
+    // Подписка не создана (нет разрешения/токена) — не кэшируем: следующий вызов попробует снова.
+    if (stop === noop) {
+      if (registrationPromise === current) registrationPromise = null;
+      return noop;
+    }
+    return () => {
+      stop();
+      if (registrationPromise === current) registrationPromise = null;
+    };
+  }).catch(() => {
+    if (registrationPromise === current) registrationPromise = null;
     return noop;
   });
-  return registrationPromise;
+  registrationPromise = current;
+  return current;
 }

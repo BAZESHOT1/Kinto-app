@@ -54,6 +54,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             paddingTop,
             paddingLeft,
             paddingRight,
+            paddingBottom: wide ? 32 : 0,
           },
         ]}
       >

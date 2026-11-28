@@ -39,6 +39,7 @@ import { APP_VERSION_LABEL } from '../src/version';
 import { useStore } from '../src/state/useStore';
 import { kv } from '../src/crypto/storage';
 import { handleCallIncomingEvent, useCallStore } from '../src/call/callStore';
+import { CallHost } from '../src/call/CallHost';
 import { api, apiBase, ensureAccessToken, getSession, setSession, initSession, wsUrl, wsFallbackUrl, type Envelope } from '../src/data/api';
 import { applyServerPreferences, initPreferenceSync } from '../src/data/preferences';
 import { loadCaches, loadProfileCaches, preloadMessageCaches, getCachedMe, getCachedChatPreviews, findCachedChat } from '../src/data/cache';
@@ -1269,6 +1270,7 @@ export default function RootLayout() {
               </Stack>
               {!ready ? <FullSkeleton /> : null}
               <ModuleAutoBanner />
+              <CallHost />
               <InAppNotifications />
               <ToastHost />
             </>

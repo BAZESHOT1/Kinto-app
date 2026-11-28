@@ -14,7 +14,7 @@
  * configured for the current build.
  */
 
-import { Platform } from 'react-native';
+import { AppState, Platform } from 'react-native';
 import messaging, {
   AuthorizationStatus as FirebaseAuthorizationStatus,
 } from '@react-native-firebase/messaging';
@@ -372,14 +372,19 @@ async function registerToken(token: string): Promise<void> {
     if (!deviceId) warn('No active session deviceId, token not sent to server');
     return;
   }
-  try {
-    await api.api.registerPushToken({
-      token,
-      platform: Platform.OS as 'ios' | 'android',
-      deviceId,
-    });
-  } catch (error) {
-    warn('Failed to register push token on the server', error);
+  // Сервер/сеть может быть недоступна в момент запуска — повторяем с нарастающей паузой.
+  for (let attempt = 0; attempt < 5; attempt += 1) {
+    try {
+      await api.api.registerPushToken({
+        token,
+        platform: Platform.OS as 'ios' | 'android',
+        deviceId,
+      });
+      return;
+    } catch (error) {
+      warn('Failed to register push token on the server', error);
+      await new Promise((r) => setTimeout(r, 3000 * (attempt + 1)));
+    }
   }
 }
 
@@ -427,6 +432,12 @@ export async function registerNativePush(session: PushSession | null | undefined
       void registerToken(nextToken);
     });
     cleanups.push(unsubscribe);
+    // При возврате в приложение заново отправляем токен: строка могла быть отключена/потеряна на сервере.
+    const appSub = AppState.addEventListener('change', (st) => {
+      if (st !== 'active') return;
+      void messaging.getToken().then((t: string | null) => (t ? registerToken(t) : undefined)).catch(() => undefined);
+    });
+    cleanups.push(() => appSub.remove());
   } catch (error) {
     warn('Native push registration failed', error);
   }
