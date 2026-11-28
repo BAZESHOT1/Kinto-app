@@ -78,13 +78,13 @@ export async function joinCallRoom(opts: JoinOptions): Promise<CallRoomHandle> {
       echoCancellation: prefs.echoCancellation,
       noiseSuppression: prefs.noiseSuppression,
       autoGainControl: effectiveAgc(prefs, Platform.OS !== 'web'),
-      voiceIsolation: prefs.noiseSuppression,
-      channelCount: 1,
-      sampleRate: 48000,
+      // Расширенные ограничения (voiceIsolation, sampleRate, channelCount) — только web/Windows: на телефонах WebRTC их не знает.
+      ...(Platform.OS === 'web' ? { voiceIsolation: prefs.noiseSuppression, channelCount: 1, sampleRate: 48000 } : null),
       ...(prefs.micDeviceId ? { deviceId: prefs.micDeviceId } : null),
     },
     // Голос по интернету: Opus fullband (48 кГц) 32 кбит/с (при плохой сети снижается до 24, см. ниже), DTX, RED против потерь. AGC выключен — голос не «плоский».
-    publishDefaults: { audioPreset: { maxBitrate: 32_000 }, dtx: true, red: true },
+    // На телефонах DTX/RED отключены: с ними JS-поток зависал на публикации микрофона (100 % CPU, кнопки не нажимались).
+    publishDefaults: { audioPreset: { maxBitrate: 32_000 }, dtx: Platform.OS === 'web', red: Platform.OS === 'web' },
   });
 
   const audioEls = new Map<string, HTMLMediaElement>();
@@ -184,9 +184,7 @@ export async function joinCallRoom(opts: JoinOptions): Promise<CallRoomHandle> {
           echoCancellation: next.echoCancellation,
           noiseSuppression: next.noiseSuppression,
           autoGainControl: effectiveAgc(next, Platform.OS !== 'web'),
-          voiceIsolation: next.noiseSuppression,
-          channelCount: 1,
-          sampleRate: 48000,
+          ...(Platform.OS === 'web' ? { voiceIsolation: next.noiseSuppression, channelCount: 1, sampleRate: 48000 } : null),
           ...(next.micDeviceId ? { deviceId: next.micDeviceId } : null),
         })
         .catch((e) => console.warn('[call] restart mic failed', String(e)));
