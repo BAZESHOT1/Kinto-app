@@ -71,6 +71,9 @@ function ActiveCall({ session }: { session: CallSession }) {
   const callIdRef = React.useRef('');
   const connectedAtRef = React.useRef(0);
   const closedRef = React.useRef(false);
+  const isDirect = chatType === 'direct';
+  const isDirectRef = React.useRef(isDirect);
+  const sawPeerRef = React.useRef(false);
   const setActiveCallId = useCallStore((s) => s.setActiveCallId);
   const activeCallId = useCallStore((s) => s.activeCallId);
 
@@ -88,7 +91,13 @@ function ActiveCall({ session }: { session: CallSession }) {
       setActiveCallId(null);
       if (id) void api.callEnd(id).catch(() => undefined);
       void endForAll;
-      useCallStore.getState().closeCall();
+      if (isDirectRef.current) {
+        // Личный звонок: показываем экран «Звонок завершён» 2 секунды и закрываем.
+        useCallStore.getState().setMinimized(false);
+        setTimeout(() => useCallStore.getState().closeCall(), 2000);
+      } else {
+        useCallStore.getState().closeCall();
+      }
     },
     [setActiveCallId],
   );
@@ -175,6 +184,16 @@ function ActiveCall({ session }: { session: CallSession }) {
     return () => clearInterval(timer);
   }, [phase]);
 
+  // Личный звонок: собеседник появился в комнате — запоминаем; если потом остались одни, считаем звонок сброшенным.
+  React.useEffect(() => {
+    if (!isDirect) return undefined;
+    const others = participants.filter((p) => !p.local).length;
+    if (others > 0) { sawPeerRef.current = true; return undefined; }
+    if (!sawPeerRef.current || phase !== 'connected') return undefined;
+    const t = setTimeout(() => { if (!closedRef.current) void leave(false); }, 1500);
+    return () => clearTimeout(t);
+  }, [participants, isDirect, phase, leave]);
+
   const toggleMute = async () => {
     const next = !muted;
     setMuted(next);
@@ -193,7 +212,9 @@ function ActiveCall({ session }: { session: CallSession }) {
       : phase === 'reconnecting'
         ? 'Переподключение…'
         : phase === 'connected'
-          ? fmt(seconds)
+          ? isDirect && !participants.some((p) => !p.local) && !sawPeerRef.current
+          ? 'Ожидаем ответ собеседника'
+          : fmt(seconds)
           : error || 'Звонок завершён';
 
   return (

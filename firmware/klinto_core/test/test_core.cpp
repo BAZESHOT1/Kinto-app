@@ -809,7 +809,6 @@ static void test_gateway(void) {
 
 static void test_channel_plan(void) {
   for (uint8_t band = KL_BAND_433; band <= KL_BAND_868; ++band) {
-    uint32_t prev = 0;
     for (uint8_t ch = 1; ch <= KL_CHANNEL_COUNT; ++ch) {
       const kl_channel_plan_entry_t *e = kl_channel_plan_entry(ch, band);
       CHECK(e != NULL);
@@ -817,15 +816,13 @@ static void test_channel_plan(void) {
       CHECK(e->wifi_channel == ch);
       CHECK(e->lora_bw_khz == 250);
       CHECK(e->lora_sync_word == (uint8_t)(0x10 + ch));
-      if (prev) CHECK(e->lora_freq_hz - prev >= 125000u);
-      prev = e->lora_freq_hz;
+      CHECK(e->lora_freq_hz == 869525000u);
     }
   }
   for (uint8_t ch = 1; ch <= KL_CHANNEL_COUNT; ++ch) {
     const kl_channel_plan_entry_t *a = kl_channel_plan_entry(ch, KL_BAND_868);
     for (uint8_t other = (uint8_t)(ch + 1); other <= KL_CHANNEL_COUNT; ++other) {
       const kl_channel_plan_entry_t *b = kl_channel_plan_entry(other, KL_BAND_868);
-      CHECK(a->lora_freq_hz != b->lora_freq_hz);
       CHECK(a->lora_sync_word != b->lora_sync_word);
     }
   }
@@ -835,7 +832,6 @@ static void test_channel_plan(void) {
   CHECK(kl_channel_plan_apply(&cfg, 5));
   CHECK(cfg.wifi_channel == 5);
   CHECK(cfg.lora.freq_mhz > 868.0f);
-  CHECK(kl_channel_plan_nearest(cfg.lora.freq_mhz) == 5);
   CHECK(!kl_channel_plan_apply(&cfg, 0));
   CHECK(!kl_channel_plan_apply(&cfg, 14));
 }

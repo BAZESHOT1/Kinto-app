@@ -9,7 +9,7 @@ import { useReducedMotion } from '../useReducedMotion';
 import { motion } from '../../theme/motion';
 
 /** Кнопка «вниз» с бейджем новых сообщений; видна, когда пользователь не внизу. */
-export function ScrollToBottom({ visible, count, onPress }: { visible: boolean; count: number; onPress: () => void }) {
+export function ScrollToBottom({ visible, count, onPress, bottomOffset = 0 }: { visible: boolean; count: number; onPress: () => void; bottomOffset?: number }) {
   const theme = useTheme();
   const reduced = useReducedMotion();
   if (!visible) return null;
@@ -18,7 +18,7 @@ export function ScrollToBottom({ visible, count, onPress }: { visible: boolean; 
       from={{ opacity: 0, scale: reduced ? 1 : 0.7, translateY: reduced ? 0 : 8 }}
       animate={{ opacity: 1, scale: 1, translateY: 0 }}
       transition={reduced ? { type: 'timing', duration: 0 } : motion.spring}
-      style={styles.wrap}
+      style={[styles.wrap, { bottom: 14 + bottomOffset }]}
     >
       <PressableScale
         pressedScale={0.9}

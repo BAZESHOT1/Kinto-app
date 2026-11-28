@@ -48,7 +48,10 @@ self.addEventListener('notificationclick', (event) => {
 
   const data = event.notification.data || {};
   const chatId = data.chatId || data.chat_id;
-  const url = chatId ? '/chat/' + encodeURIComponent(chatId) : '/chats';
+  let url = chatId ? '/chat/' + encodeURIComponent(chatId) : '/chats';
+  if (data.kind === 'call' && data.callId) {
+    url = '/chat/' + (chatId ? encodeURIComponent(chatId) : 'x') + '/call?callId=' + encodeURIComponent(data.callId) + '&type=' + encodeURIComponent(data.callKind || '') + '&title=' + encodeURIComponent(data.fromName || '');
+  }
 
   event.waitUntil(
     (async () => {

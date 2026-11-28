@@ -299,7 +299,7 @@ bool KlintoNode::loadConfig() {
    * диапазоне слышат друг друга по LoRa. Частота и sync word — из плана каналов соты. */
   if (cfg_.lora_present) {
     const bool is433 = cfg_.lora.freq_mhz > 0.0f && cfg_.lora.freq_mhz < 500.0f;
-    if (is433 || cfg_.lora.freq_mhz <= 0.0f) cfg_.lora.freq_mhz = 868.1f;
+    if (is433 || cfg_.lora.freq_mhz <= 0.0f) cfg_.lora.freq_mhz = 869.525f;
     const uint8_t ch = cfg_.wifi_channel >= 1 && cfg_.wifi_channel <= KL_CHANNEL_COUNT ? cfg_.wifi_channel : 1;
     kl_channel_plan_apply(&cfg_, ch);
   }

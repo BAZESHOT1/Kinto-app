@@ -18,6 +18,7 @@ import {
   TextInput,
   View,
   StyleSheet,
+  useWindowDimensions,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { BlurView } from 'expo-blur';
@@ -29,6 +30,7 @@ import { useLayoutInsets } from '../../../src/theme/useLayoutInsets';
 import { useShellMetrics } from '../../../src/components/AppShell';
 import { contentWidth, listBottomReserve, spacing } from '../../../src/theme/layout';
 import { Wallpaper } from '../../../src/components/Wallpaper';
+import { ProgressiveBlur } from '../../../src/components/chat/ProgressiveBlur';
 import { Glass, GLASS_FILL_BUTTON } from '../../../src/components/Glass';
 import { useTheme } from '../../../src/theme/useTheme';
 import { copyText } from '../../../src/utils/clipboard';
@@ -138,6 +140,8 @@ function ChatScreen({ forcedId }: { forcedId?: string } = {}) {
   const reduced = useReducedMotion();
   const insets = useLayoutInsets();
   const shell = useShellMetrics();
+  const [topH, setTopH] = useState(0);
+  const [bottomH, setBottomH] = useState(0);
   /* ВАЖНО: queryClient должен быть объявлен до useCallback(commitToCache),
    * иначе на веб-сборке возникает TDZ ReferenceError при открытии чата. */
   const qc = useQueryClient();
@@ -1922,6 +1926,14 @@ function ChatScreen({ forcedId }: { forcedId?: string } = {}) {
         }}
       >
         <Wallpaper image={chat?.background ?? null} bleed />
+        {/* Шапка и всё, что под ней, — прозрачный оверлей: история уходит под него и плавно размывается к краю. */}
+        <View
+          pointerEvents="box-none"
+          onLayout={(e) => setTopH(Math.round(e.nativeEvent.layout.height))}
+          style={{ position: 'absolute', top: 0, left: 0, right: 0, zIndex: 20 }}
+        >
+          <ProgressiveBlur edge="top" height={topH + 26} />
+        <View style={{ paddingTop: shell.wide ? 0 : shell.insets.top }} pointerEvents="box-none">
         <ChatHeader
           title={title || 'Диалог'}
           channel={channel}
@@ -2018,7 +2030,10 @@ function ChatScreen({ forcedId }: { forcedId?: string } = {}) {
           </Text>
         ) : null}
 
-        <View style={{ flex: 1 }}>
+        </View>
+        </View>
+
+        <View style={StyleSheet.absoluteFill}>
           {(chatQuery.isLoading || !chat) && allMessages.length === 0 ? (
             <MotiView
               from={{ opacity: 0, translateY: 6 }}
@@ -2056,7 +2071,9 @@ function ChatScreen({ forcedId }: { forcedId?: string } = {}) {
               }
               contentContainerStyle={{
                 padding: wide ? 24 : 10,
-                paddingBottom: 26,
+                // Историю не прячем: сверху/снизу резерв под оверлеи (новейшее сообщение не оказывается под полем ввода).
+                paddingTop: topH + 12,
+                paddingBottom: bottomH + 12,
                 maxWidth: contentWidth.chat,
                 width: '100%',
                 alignSelf: 'center',
@@ -2111,6 +2128,7 @@ function ChatScreen({ forcedId }: { forcedId?: string } = {}) {
           )}
 
           <ScrollToBottom
+            bottomOffset={bottomH}
             visible={!atBottom || unreadCount > 0 || newCount > 0}
             count={Math.max(unreadCount, newCount)}
             onPress={() => {
@@ -2123,6 +2141,12 @@ function ChatScreen({ forcedId }: { forcedId?: string } = {}) {
           />
         </View>
 
+        <View
+          pointerEvents="box-none"
+          onLayout={(e) => setBottomH(Math.round(e.nativeEvent.layout.height))}
+          style={{ position: 'absolute', bottom: 0, left: 0, right: 0, zIndex: 20 }}
+        >
+        <ProgressiveBlur edge="bottom" height={bottomH + 26} />
         {/* «печатает» показываем только в шапке чата — дубль над композером убран. */}
 
         {dropBusy ? (
@@ -2206,12 +2230,9 @@ function ChatScreen({ forcedId }: { forcedId?: string } = {}) {
           style={[
             styles.composer,
             {
-              borderTopColor: theme.glassBorder,
-              // Полупрозрачный слой поверх истории: сообщения читаются под ним.
-              backgroundColor: theme.dark ? 'rgba(10,10,12,0.72)' : 'rgba(255,255,255,0.88)',
-              ...(Platform.OS === 'web'
-                ? ({ backdropFilter: 'blur(28px) saturate(1.5)', WebkitBackdropFilter: 'blur(28px) saturate(1.5)' } as object)
-                : null),
+              // Поле ввода прозрачное, без подложки и линии: фон чата просвечивает, историю размывает ProgressiveBlur.
+              borderTopColor: 'transparent',
+              backgroundColor: 'transparent',
               opacity: canCompose ? 1 : 0.65,
               // Safe-area снизу только при закрытой клавиатуре: иначе KAV уже
               // поднял композер, и лишний отступ даёт «пузырь» над клавиатурой.
@@ -2311,6 +2332,7 @@ function ChatScreen({ forcedId }: { forcedId?: string } = {}) {
             </Pressable>
           </Animated.View>
           ) : null}
+        </View>
         </View>
 
         <AttachmentMenu

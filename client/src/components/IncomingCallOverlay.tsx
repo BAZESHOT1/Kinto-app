@@ -36,7 +36,7 @@ export function IncomingCallOverlay() {
     setIncoming(null);
     router.push({
       pathname: `/chat/${call.chatId ?? 'x'}/call`,
-      params: { callId: call.callId, title: call.fromName },
+      params: { callId: call.callId, title: call.fromName, type: call.kind },
     } as never);
   };
 

@@ -14,7 +14,7 @@
 #define KL_FALLBACK_OFFLINE_CHANNEL 1
 
 enum kl_plan_band_t : uint8_t {
-  KL_BAND_433 = 0,
+  KL_BAND_433 = 0, /* зарезервировано, не используется: сеть работает только на 869.525 МГц */
   KL_BAND_868 = 1
 };
 

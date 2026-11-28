@@ -64,7 +64,15 @@ function handleEnvelope(bytes: Uint8Array): void {
   try {
     const plain = gcm(fromB64(session.meshRelayKey), env.nonce).decrypt(env.ciphertext);
     const body = plain[0] & 1 ? inflateSync(plain.subarray(1)) : plain.subarray(1);
-    const res = JSON.parse(utf8Decode(body)) as { i?: number; s?: number; b?: unknown };
+    const res = JSON.parse(utf8Decode(body)) as { i?: number; s?: number; b?: unknown; e?: string };
+    // Событие от Hub без запроса (например входящий звонок по kMesh).
+    if (res.e) {
+      if (res.e === 'call_in') {
+        const ev = res as unknown as Record<string, unknown>;
+        void import('../call/callStore').then((m) => m.handleCallIncomingEvent({ ...ev, type: 'call_incoming' }, session.userId));
+      }
+      return;
+    }
     const item = pending.get(Number(res.i));
     if (!item) return;
     pending.delete(Number(res.i));
@@ -73,6 +81,10 @@ function handleEnvelope(bytes: Uint8Array): void {
   } catch {
     /* чужой/повреждённый ответ */
   }
+}
+
+export function ensureMeshEvents(): void {
+  wire();
 }
 
 function wire(): void {

@@ -225,6 +225,19 @@ function notificationFromMessage(message: RemoteMessage, hidden = false): PushDi
 
 function handleChatPress(data: PushData | Record<string, unknown> | null | undefined, navigate: boolean): void {
   const chatId = chatIdFromData(data);
+  const d = (data ?? {}) as Record<string, unknown>;
+  // Нажатие на «входящий звонок»: сразу открываем звонок (join), а не просто чат.
+  if (navigate && d.kind === 'call' && typeof d.callId === 'string' && d.callId) {
+    try {
+      router.push({
+        pathname: `/chat/${chatId ? encodeURIComponent(chatId) : 'x'}/call`,
+        params: { callId: d.callId, type: String(d.callKind ?? ''), title: String(d.fromName ?? '') },
+      } as never);
+      return;
+    } catch (error) {
+      warn('Failed to open call from notification press', error);
+    }
+  }
   if (!chatId) return;
   if (!navigate) {
     // Background/quit: navigation is handled by the OS (launch intent) and

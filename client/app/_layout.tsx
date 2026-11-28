@@ -1213,6 +1213,12 @@ export default function RootLayout() {
   }, [sessionState?.userId, sessionState?.deviceId]);
 
   useEffect(() => {
+    // События Hub по kMesh (входящие звонки без интернета) принимаем всегда, пока есть сессия.
+    if (!sessionState) return;
+    void import('../src/modules/meshHttp').then((m) => m.ensureMeshEvents()).catch(() => undefined);
+  }, [sessionState?.userId]);
+
+  useEffect(() => {
     if (!ready) return undefined;
     const stop = startNetworkStateMonitor();
     return () => stop();
