@@ -15,7 +15,7 @@ export type MeshParams = {
   callId: string;
   key: string; // base64, 16 байт
   keyId: number;
-  bitrate: 3200 | 1200;
+  bitrate: 3200 | 1200 | 700;
   frameMs: number;
   batch: number;
   /** Канал звонка: от него зависит транспорт голоса (строго LoRa или строго ESP-NOW). */

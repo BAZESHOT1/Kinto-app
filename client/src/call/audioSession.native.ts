@@ -13,7 +13,15 @@ export const supportsSpeakerToggle = true;
 
 export async function startCallAudioSession(): Promise<void> {
   const { AndroidAudioTypePresets, AudioSession } = lk();
-  // iOS: категория playAndRecord и режим voiceChat — системное шумо-/эхоподавление голосовой связи.
+  await AudioSession.configureAudio({
+    android: {
+      preferredOutputList: ['speaker', 'earpiece', 'bluetooth', 'headset'],
+      audioTypeOptions: AndroidAudioTypePresets.communication,
+    },
+    ios: { defaultOutput: 'speaker' },
+  });
+  await AudioSession.startAudioSession();
+  // iOS (после старта сессии): категория playAndRecord и режим voiceChat — системное шумо-/эхоподавление голосовой связи.
   // Android: AndroidAudioTypePresets.communication (MODE_IN_COMMUNICATION) включает аппаратные NS/AEC, где они есть.
   if (Platform.OS === 'ios') {
     try {
@@ -25,14 +33,6 @@ export async function startCallAudioSession(): Promise<void> {
       /* не критично: LiveKit выставит конфигурацию сам */
     }
   }
-  await AudioSession.configureAudio({
-    android: {
-      preferredOutputList: ['speaker', 'earpiece', 'bluetooth', 'headset'],
-      audioTypeOptions: AndroidAudioTypePresets.communication,
-    },
-    ios: { defaultOutput: 'speaker' },
-  });
-  await AudioSession.startAudioSession();
 }
 
 export async function stopCallAudioSession(): Promise<void> {

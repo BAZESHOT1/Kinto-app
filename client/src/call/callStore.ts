@@ -21,6 +21,8 @@ export type CallSession = {
   joinId: string;
   title: string;
   mesh: boolean;
+  /** Постоянный голосовой топик группы (вместо обычного звонка). */
+  topicId?: string;
 };
 
 type CallStoreState = {
@@ -41,6 +43,9 @@ type CallStoreState = {
   setActiveCallId: (id: string | null) => void;
   /** Звонок завершён сервером: убираем приглашение и активный звонок. */
   onCallEnded: (callId: string) => void;
+  /** Звонок перехвачен другим устройством аккаунта: закрываем его у себя без обращения к серверу. */
+  replacedCallId: string | null;
+  onCallReplaced: (callId: string, exceptKey: string) => void;
 };
 
 export const useCallStore = create<CallStoreState>((set, get) => ({
@@ -49,7 +54,12 @@ export const useCallStore = create<CallStoreState>((set, get) => ({
   connectedAt: null,
   openCall: (session) => {
     // Уже идёт звонок — просто разворачиваем его (повторный запуск из чата не создаёт второй).
-    if (get().session) { set({ minimized: false }); return; }
+    const cur = get().session;
+    if (cur) {
+      // Тот же звонок/топик — просто разворачиваем; другой голосовой топик или звонок — отключаемся от текущего и входим в выбранный.
+      const same = (session.topicId && session.topicId === cur.topicId) || (session.joinId && session.joinId === cur.joinId && !session.topicId && !cur.topicId);
+      if (same || (!session.topicId && !session.joinId && !cur.topicId && !cur.joinId && session.chatId === cur.chatId)) { set({ minimized: false }); return; }
+    }
     set({ session: { ...session, key: `${Date.now()}` }, minimized: false, connectedAt: null });
   },
   setMinimized: (minimized) => set({ minimized }),
@@ -59,6 +69,12 @@ export const useCallStore = create<CallStoreState>((set, get) => ({
   activeCallId: null,
   setIncoming: (incoming) => set({ incoming }),
   setActiveCallId: (activeCallId) => set({ activeCallId }),
+  replacedCallId: null,
+  onCallReplaced: (callId, exceptKey) => {
+    const s = get();
+    if (s.session && s.activeCallId === callId && s.session.key !== exceptKey) set({ replacedCallId: callId });
+    if (s.incoming?.callId === callId) set({ incoming: null });
+  },
   onCallEnded: (callId) => {
     const s = get();
     set({

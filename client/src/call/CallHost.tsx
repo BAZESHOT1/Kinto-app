@@ -102,6 +102,8 @@ function ActiveCall({ session }: { session: CallSession }) {
   const roomRef = React.useRef<CallRoomHandle | null>(null);
   const meshRef = React.useRef<MeshVoiceHandle | null>(null);
   const callIdRef = React.useRef('');
+  // Постоянный голосовой топик группы: звонок не создаётся, комната принадлежит топику.
+  const topicRef = React.useRef('');
   const connectedAtRef = React.useRef(0);
   const closedRef = React.useRef(false);
   const speakerRef = React.useRef(Platform.OS !== 'web');
@@ -112,7 +114,7 @@ function ActiveCall({ session }: { session: CallSession }) {
   const activeCallId = useCallStore((s) => s.activeCallId);
 
   const leave = React.useCallback(
-    async (endForAll: boolean) => {
+    async (endForAll: boolean, silent = false) => {
       if (closedRef.current) return;
       closedRef.current = true;
       setPhase('ended');
@@ -121,11 +123,16 @@ function ActiveCall({ session }: { session: CallSession }) {
       roomRef.current = null;
       meshRef.current?.stop();
       meshRef.current = null;
-      if (id && meshMode) void api.callMeshLeave(id).catch(() => undefined);
+      if (id && meshMode && !silent) void api.callMeshLeave(id).catch(() => undefined);
       setActiveCallId(null);
-      if (id) void api.callEnd(id).catch(() => undefined);
+      if (topicRef.current && !silent) void api.topicVoiceLeave(topicRef.current).catch(() => undefined);
+      else if (id && !silent) void api.callEnd(id).catch(() => undefined);
       void endForAll;
-      if (isDirectRef.current) {
+      if (silent) {
+        // Звонок продолжается на другом устройстве аккаунта.
+        useCallStore.getState().setMinimized(false);
+        useCallStore.getState().closeCall();
+      } else if (isDirectRef.current) {
         // Личный звонок: показываем экран «Звонок завершён» 2 секунды и закрываем.
         useCallStore.getState().setMinimized(false);
         setTimeout(() => useCallStore.getState().closeCall(), 2000);
@@ -151,14 +158,31 @@ function ActiveCall({ session }: { session: CallSession }) {
         return;
       }
       try {
-        const res = joinId ? await api.callJoin(joinId) : await api.callStart({ chatId: chatId || undefined, channel: meshChannel ?? 'internet', serverId: meshChannel ? undefined : await pickReachableServer() });
-        if (cancelled) return;
+        type StartRes = Awaited<ReturnType<typeof api.callStart>>;
+        let res: StartRes | null = null as StartRes | null;
+        if (session.topicId) {
+          // Голосовой топик группы: пустой канал, телефон никому не звонит, комната создаётся при первом входе.
+          const t = await api.topicVoiceJoin(session.topicId, { sessionKey: session.key, serverId: await pickReachableServer() });
+          if (t.callId) {
+            // Автоматический топик группового звонка — обычный звонок.
+            res = (await api.callJoin(t.callId, session.key)) as unknown as StartRes;
+          } else if (t.server && t.token) {
+            topicRef.current = session.topicId;
+            res = { ok: true, callId: `topic:${session.topicId}`, server: t.server, roomName: t.roomName ?? '', token: t.token, members: [] } as unknown as StartRes;
+          } else {
+            throw new Error('topic_unavailable');
+          }
+        } else {
+          res = (joinId ? await api.callJoin(joinId, session.key) : await api.callStart({ chatId: chatId || undefined, channel: meshChannel ?? 'internet', serverId: meshChannel ? undefined : await pickReachableServer(), sessionKey: session.key })) as unknown as StartRes;
+        }
+
+        if (cancelled || !res) return;
         callIdRef.current = res.callId;
         setActiveCallId(res.callId);
         useCallStore.getState().setIncoming(null);
         if (meshMode && Platform.OS !== 'web') {
           // E-kMesh: голос идёт Codec2 через модуль, комната LiveKit подключается шлюзом на сервере.
-          const m = await api.callMeshJoin(res.callId, meshChannel === 'l-kmesh' ? 1200 : 3200, meshChannel === 'l-kmesh' ? 'l-kmesh' : 'e-kmesh');
+          const m = await api.callMeshJoin(res.callId, 700, meshChannel === 'l-kmesh' ? 'l-kmesh' : 'e-kmesh', session.key);
           meshRef.current = await startMeshVoice({ callId: res.callId, ...m.mesh, channel: meshChannel === 'l-kmesh' ? 'l-kmesh' : 'e-kmesh' });
           connectedAtRef.current = Date.now();
           useCallStore.getState().setConnectedAt(connectedAtRef.current);
@@ -175,7 +199,7 @@ function ActiveCall({ session }: { session: CallSession }) {
             if (p === 'connected' && !connectedAtRef.current) { connectedAtRef.current = Date.now(); useCallStore.getState().setConnectedAt(connectedAtRef.current); }
             if (p === 'disconnected') {
               if (reason) console.warn('[call] disconnected', reason);
-              void leave(false);
+              void leave(false, reason === 'duplicate');
               return;
             }
             setPhase(p);
@@ -196,7 +220,8 @@ function ActiveCall({ session }: { session: CallSession }) {
         const offline = /network|failed to fetch|timeout|abort|load failed/i.test(code);
         setError(known ? ERRORS[known] : /mesh_audio_native_unsupported/.test(code) ? 'Голос через E-kMesh на телефонах пока недоступен: используйте интернет или web-клиент' : /no_module_bound/.test(code) ? 'К аккаунту не привязан носимый модуль' : offline ? 'Нет связи с сервером. Без интернета звонок возможен через E-kMesh при подключённом носимом модуле' : Platform.OS === 'web' && /permission|NotAllowed/i.test(code) ? 'Разрешите доступ к микрофону в браузере' : `Не удалось начать звонок: ${code}`);
         setPhase('ended');
-        if (callIdRef.current) void api.callEnd(callIdRef.current).catch(() => undefined);
+        if (topicRef.current) void api.topicVoiceLeave(topicRef.current).catch(() => undefined);
+        else if (callIdRef.current) void api.callEnd(callIdRef.current).catch(() => undefined);
         setActiveCallId(null);
       }
     })();
@@ -208,11 +233,21 @@ function ActiveCall({ session }: { session: CallSession }) {
         meshRef.current?.stop();
         const id = callIdRef.current;
         setActiveCallId(null);
-        if (id) void api.callEnd(id).catch(() => undefined);
+        if (topicRef.current) void api.topicVoiceLeave(topicRef.current).catch(() => undefined);
+        else if (id) void api.callEnd(id).catch(() => undefined);
       }
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // Звонок перехвачен другим устройством этого аккаунта — тихо выходим (сервер уже знает).
+  const replacedCallId = useCallStore((st) => st.replacedCallId);
+  React.useEffect(() => {
+    if (replacedCallId && replacedCallId === callIdRef.current && !closedRef.current) {
+      useCallStore.setState({ replacedCallId: null });
+      void leave(false, true);
+    }
+  }, [replacedCallId, leave]);
 
   // Сервер завершил звонок (владелец или пустая комната) — выходим.
   React.useEffect(() => {
@@ -285,7 +320,7 @@ function ActiveCall({ session }: { session: CallSession }) {
       <View style={styles.header}>
         <Text style={{ color: theme.textPrimary, fontSize: 22, fontWeight: '800' }} numberOfLines={1}>{title}</Text>
         <Text style={{ color: phase === 'reconnecting' || error ? theme.warning : theme.accent, fontSize: 16, marginTop: 6 }}>{status}</Text>
-        <Text style={{ color: theme.textSecondary, fontSize: 12, marginTop: 4 }}>{meshChannel === 'l-kmesh' ? 'L-kMesh · LoRa · Codec2 1200 бит/с' : meshChannel === 'e-kmesh' ? 'E-kMesh · ESP-NOW · Codec2 3200 бит/с' : 'Интернет · WebRTC · Opus'}</Text>
+        <Text style={{ color: theme.textSecondary, fontSize: 12, marginTop: 4 }}>{meshChannel === 'l-kmesh' ? 'L-kMesh · LoRa · Codec2 700C' : meshChannel === 'e-kmesh' ? 'E-kMesh · ESP-NOW · Codec2 700C' : 'Интернет · WebRTC · Opus'}</Text>
       </View>
 
       <ScrollView contentContainerStyle={styles.grid} showsVerticalScrollIndicator={false}>

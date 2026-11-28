@@ -1,3 +1,4 @@
+import { useCallStore } from '../../../../src/call/callStore';
 import { DirectChatResolver, directPeerFromParam } from '../../../../src/components/chat/DirectChatResolver';
 import { safeBack } from '../../../../src/navigation/safeBack';
 import React from 'react';
@@ -6,7 +7,7 @@ import { InviteMembersModal } from '../../../../src/components/chatinfo/InviteMe
 import { Ionicons } from '@expo/vector-icons';
 import { MotiView } from 'moti';
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import { useQueryClient } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useTheme } from '../../../../src/theme/useTheme';
 import { CONTENT_BOTTOM_PAD } from '../../../../src/theme/layout';
 import { motion } from '../../../../src/theme/motion';
@@ -190,6 +191,15 @@ function ChatInfoScreen({ forcedId }: { forcedId?: string } = {}) {
   const canManagePeople =
     !isDirect && (myRole === 'owner' || (myRole === 'admin' && hasRight(chat, myUsername, 'manageMembers')));
   const managePending = chat?.pendingRequests ?? 0;
+  // Топики группы: выключены по умолчанию, включает владелец/админ/модератор.
+  const canManageTopics = !isDirect && type === 'group' && (myRole === 'owner' || myRole === 'admin' || myRole === 'moderator');
+  const topicsQ = useQuery({
+    queryKey: ['topics', chatId],
+    queryFn: () => api.api.getTopics(chatId),
+    enabled: Boolean(chatId) && type === 'group',
+    staleTime: 15_000,
+  });
+  const topicsOn = topicsQ.data?.enabled === true;
 
   const pinned = chat?.pinnedMessage ?? null;
   const pinnedMessage = pinned ? messages.find((m) => m.id === pinned.id) ?? null : null;
@@ -614,9 +624,31 @@ function ChatInfoScreen({ forcedId }: { forcedId?: string } = {}) {
 
           <InfoQuickActions actions={quickActions} />
 
+          {canManageTopics ? (
+            <Pressable
+              onPress={() => void api.api.setTopicsEnabled(chatId, !topicsOn).then(() => topicsQ.refetch()).catch(() => undefined)}
+              accessibilityRole="switch"
+              accessibilityState={{ checked: topicsOn }}
+              style={{
+                marginTop: 10, padding: 14, borderRadius: 12,
+                flexDirection: 'row', alignItems: 'center', gap: 10,
+                borderWidth: 1, borderColor: topicsOn ? theme.accent : theme.line,
+                backgroundColor: topicsOn ? theme.accentSoft : 'transparent',
+              }}
+            >
+              <Ionicons name="albums-outline" size={20} color={topicsOn ? theme.accent : theme.textSecondary} />
+              <View style={{ flex: 1 }}>
+                <Text style={{ color: topicsOn ? theme.accent : theme.textPrimary, fontWeight: '700' }}>Топики</Text>
+                <Text style={{ color: theme.textSecondary, fontSize: 12, marginTop: 2 }}>
+                  {topicsOn ? 'Включены: в диалоге появится полоса топиков' : 'Выключены. Включите, чтобы добавить текстовые и голосовые топики'}
+                </Text>
+              </View>
+              <Text style={{ color: topicsOn ? theme.accent : theme.textSecondary, fontWeight: '800' }}>{topicsOn ? 'Вкл' : 'Выкл'}</Text>
+            </Pressable>
+          ) : null}
           {canStartCall ? (
             <Pressable
-              onPress={() => router.push(`/chat/${chatId}/call?type=${type || ''}&autoStart=1` as never)}
+              onPress={() => useCallStore.getState().openCall({ chatId, chatType: String(type || ''), joinId: '', title: '', mesh: false })}
               style={{
                 marginTop: 10, padding: 14, borderRadius: 12,
                 flexDirection: 'row', alignItems: 'center', gap: 10,
@@ -631,7 +663,7 @@ function ChatInfoScreen({ forcedId }: { forcedId?: string } = {}) {
           ) : null}
           {canStartCall && Platform.OS !== 'web' ? (
             <Pressable
-              onPress={() => router.push(`/chat/${chatId}/call?type=${type || ''}&mesh=1` as never)}
+              onPress={() => useCallStore.getState().openCall({ chatId, chatType: String(type || ''), joinId: '', title: '', mesh: true })}
               style={{ marginTop: 8, padding: 12, borderRadius: 12, flexDirection: 'row', alignItems: 'center', gap: 10, borderWidth: 1, borderColor: theme.line }}
             >
               <Ionicons name="radio" size={18} color={theme.textSecondary} />

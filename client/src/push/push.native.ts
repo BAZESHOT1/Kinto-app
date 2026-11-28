@@ -15,6 +15,7 @@
  */
 
 import { AppState, Platform } from 'react-native';
+import { useCallStore } from '../call/callStore';
 import messaging, {
   AuthorizationStatus as FirebaseAuthorizationStatus,
 } from '@react-native-firebase/messaging';
@@ -229,10 +230,7 @@ function handleChatPress(data: PushData | Record<string, unknown> | null | undef
   // Нажатие на «входящий звонок»: сразу открываем звонок (join), а не просто чат.
   if (navigate && d.kind === 'call' && typeof d.callId === 'string' && d.callId) {
     try {
-      router.push({
-        pathname: `/chat/${chatId ? encodeURIComponent(chatId) : 'x'}/call`,
-        params: { callId: d.callId, type: String(d.callKind ?? ''), title: String(d.fromName ?? '') },
-      } as never);
+      useCallStore.getState().openCall({ chatId: chatId ?? '', chatType: String(d.callKind ?? ''), joinId: d.callId, title: String(d.fromName ?? ''), mesh: false });
       return;
     } catch (error) {
       warn('Failed to open call from notification press', error);

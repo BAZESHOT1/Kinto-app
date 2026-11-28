@@ -50,7 +50,7 @@ export async function joinCallRoom(opts: JoinOptions): Promise<CallRoomHandle> {
   console.log('[call] step globals');
   ensureCallGlobals();
   // eslint-disable-next-line @typescript-eslint/no-require-imports
-  const { ConnectionState, Room, RoomEvent, Track } = guarded(() => require('livekit-client') as typeof import('livekit-client'));
+  const { ConnectionState, DisconnectReason, Room, RoomEvent, Track } = guarded(() => require('livekit-client') as typeof import('livekit-client'));
   console.log('[call] step audio-session');
   await startCallAudioSession();
   const room = new Room({
@@ -59,9 +59,9 @@ export async function joinCallRoom(opts: JoinOptions): Promise<CallRoomHandle> {
     stopLocalTrackOnUnpublish: true,
     // Эквивалент getUserMedia({ audio: { noiseSuppression: true } }): web/Windows — браузерный движок,
     // iOS/Android — react-native-webrtc (noiseSuppression) поверх AVAudioSession voiceChat / NoiseSuppressor.
-    audioCaptureDefaults: { echoCancellation: true, noiseSuppression: true, autoGainControl: true, voiceIsolation: true, channelCount: 1, sampleRate: 48000 },
-    // Качество голоса по интернету: Opus 64 кбит/с (было 24 у пресета speech), без DTX (он «съедал» тихие слоги), с RED против потерь.
-    publishDefaults: { audioPreset: { maxBitrate: 64_000 }, dtx: false, red: true },
+    audioCaptureDefaults: { echoCancellation: true, noiseSuppression: true, autoGainControl: false, voiceIsolation: true, channelCount: 1, sampleRate: 48000 },
+    // Голос по интернету: Opus fullband (48 кГц) 32 кбит/с (при плохой сети снижается до 24, см. ниже), DTX, RED против потерь. AGC выключен — голос не «плоский».
+    publishDefaults: { audioPreset: { maxBitrate: 32_000 }, dtx: true, red: true },
   });
 
   const audioEls = new Map<string, HTMLMediaElement>();
@@ -100,19 +100,48 @@ export async function joinCallRoom(opts: JoinOptions): Promise<CallRoomHandle> {
       else if (state === ConnectionState.Reconnecting) opts.onPhase('reconnecting');
       else if (state === ConnectionState.Connecting) opts.onPhase('connecting');
     })
-    .on(RoomEvent.Disconnected, (reason) => opts.onPhase('disconnected', reason !== undefined ? String(reason) : undefined))
+    .on(RoomEvent.ConnectionQualityChanged, (quality, participant) => {
+      // Адаптивный битрейт: при плохом качестве сети 24 кбит/с, иначе 32.
+      if (participant !== room.localParticipant) return;
+      try {
+        const pub = room.localParticipant.getTrackPublication(Track.Source.Microphone);
+        const sender = (pub?.audioTrack as unknown as { sender?: RTCRtpSender } | undefined)?.sender;
+        if (!sender) return;
+        const params = sender.getParameters();
+        if (!params.encodings?.length) return;
+        const want = quality === 'poor' || quality === 'lost' ? 24_000 : 32_000;
+        if (params.encodings[0].maxBitrate !== want) {
+          params.encodings[0].maxBitrate = want;
+          void sender.setParameters(params).catch(() => undefined);
+        }
+      } catch {
+        /* не критично */
+      }
+    })
+    .on(RoomEvent.Disconnected, (reason) =>
+      // DUPLICATE_IDENTITY: тот же аккаунт вошёл в звонок на другом устройстве.
+      opts.onPhase('disconnected', reason === DisconnectReason.DUPLICATE_IDENTITY ? 'duplicate' : reason !== undefined ? String(reason) : undefined))
     .on(RoomEvent.AudioPlaybackStatusChanged, () => {
       // Автовоспроизведение в браузере требует жеста пользователя; он у нас был (нажатие «Позвонить»/«Принять»).
       if (!room.canPlaybackAudio) void room.startAudio().catch(() => undefined);
     });
 
+  let wantMuted = false;
   opts.onPhase('connecting');
   try {
     console.log('[call] step connect', opts.url);
-    await room.connect(opts.url, opts.token, { autoSubscribe: true });
+    await room.connect(opts.url, opts.token, { autoSubscribe: true, peerConnectionTimeout: 30_000, websocketTimeout: 20_000 });
     console.log('[call] step microphone');
     await room.localParticipant.setMicrophoneEnabled(true);
     console.log('[call] step ready');
+    // iOS: микрофон мог остаться выключенным (сессия ещё не активна) — проверяем и включаем повторно, пока пользователь сам его не выключил.
+    for (const delay of [1200, 3500, 8000]) {
+      setTimeout(() => {
+        if (wantMuted || room.state !== ConnectionState.Connected || room.localParticipant.isMicrophoneEnabled) return;
+        console.warn('[call] mic was off, re-enabling');
+        void room.localParticipant.setMicrophoneEnabled(true).then(emit).catch(() => undefined);
+      }, delay);
+    }
     if (Platform.OS === 'web') {
       await room.startAudio().catch(() => undefined);
       // Локальное шумоподавление RNNoise (web и Windows). Ошибка не должна ломать звонок.
@@ -134,6 +163,7 @@ export async function joinCallRoom(opts: JoinOptions): Promise<CallRoomHandle> {
 
   return {
     setMuted: async (muted) => {
+      wantMuted = muted;
       await room.localParticipant.setMicrophoneEnabled(!muted);
       emit();
     },

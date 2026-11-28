@@ -601,6 +601,10 @@ function RealtimeBridge() {
             void qc.invalidateQueries({ queryKey: ['channels'] });
           } else if (event.type === 'call_incoming') {
             handleCallIncomingEvent(event, getSession()?.userId);
+          } else if (event.type === 'topics_updated' && typeof event.chatId === 'string') {
+            void qc.invalidateQueries({ queryKey: ['topics', event.chatId] });
+          } else if (event.type === 'call_replaced' && typeof event.callId === 'string') {
+            useCallStore.getState().onCallReplaced(event.callId, String(event.exceptKey ?? ''));
           } else if (event.type === 'call_ended' && typeof event.callId === 'string') {
             useCallStore.getState().onCallEnded(event.callId);
           } else if (event.type === 'account_suspended' || event.type === 'account_restored') {

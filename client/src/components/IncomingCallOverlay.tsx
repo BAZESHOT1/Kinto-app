@@ -36,10 +36,8 @@ export function IncomingCallOverlay() {
   const accept = () => {
     const call = incoming;
     setIncoming(null);
-    router.push({
-      pathname: `/chat/${call.chatId ?? 'x'}/call`,
-      params: { callId: call.callId, title: call.fromName, type: call.kind },
-    } as never);
+    // Звонок открывает глобальный хост напрямую: промежуточный модальный маршрут на iOS оставлял невидимый слой, перекрывавший кнопки.
+    useCallStore.getState().openCall({ chatId: call.chatId ?? '', chatType: call.kind ?? '', joinId: call.callId, title: call.fromName, mesh: false });
   };
 
   return (

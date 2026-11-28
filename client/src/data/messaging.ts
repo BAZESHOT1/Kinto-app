@@ -4,6 +4,7 @@
  * Если связь недоступна — сообщение остаётся в локальной очереди и будет
  * доставлено автоматически.
  */
+import { getSendTopic } from './topicContext';
 import * as api from './api';
 import type { Chat, ChatEncryption, Envelope, MessageReaction } from './api';
 import {
@@ -85,6 +86,8 @@ export interface ViewMessage {
   localPreview?: string;
   /** Пост опубликован от имени канала (композер канала). */
   asChannel?: boolean;
+  /** Текстовый топик группы (header.topicId); нет значения — «Общий». */
+  topicId?: string;
   /** Просмотры поста канала (приходит с конвертом). */
   viewsCount?: number;
   /* ---- системные сообщения о событиях группы (kind='system') ---- */
@@ -328,6 +331,7 @@ export async function sendMessage(
     ...header,
     clientId,
     ...(opts.asChannel ? ({ asChannel: true } as object) : {}),
+    ...(getSendTopic(chatId) ? ({ topicId: getSendTopic(chatId) } as object) : {}),
   };
 
   const draft: ViewMessage = {
@@ -348,6 +352,7 @@ export async function sendMessage(
     pending: true,
     clientId,
     asChannel: opts.asChannel,
+    topicId: getSendTopic(chatId) ?? undefined,
   };
 
   const item: Omit<OutboxItem, 'state' | 'attempts'> & {
@@ -641,6 +646,7 @@ async function decryptWithKey(env: Envelope, rawKey: Uint8Array | null, myUserna
     scheme: meta.scheme,
     commentsCount: env.commentsCount,
     asChannel: envExt.asChannel === true || envHeader.asChannel === true,
+    topicId: typeof envHeader.topicId === 'string' ? envHeader.topicId : undefined,
     viewsCount: envExt.viewsCount,
   };
   // Системное сообщение нечего скачивать с узлов: текст лежит открытым в

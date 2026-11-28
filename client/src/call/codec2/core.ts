@@ -2,9 +2,10 @@
  * Codec2 (drowe67/codec2 1.2.0, LGPL-2.1) в JS: WebAssembly в браузере/Windows-оболочке, чистый JS на Hermes.
  * 8 кГц, моно, 16 бит. 3200 бит/с — E-kMesh (ESP-NOW), 1200 бит/с — L-kMesh (LoRa).
  */
-export type Codec2Bitrate = 3200 | 1200;
+export type Codec2Bitrate = 3200 | 1200 | 700;
 
-const MODES: Record<Codec2Bitrate, number> = { 3200: 0, 1200: 5 };
+/** 700 — режим 700C: максимальное сжатие для звонков через kMesh (ESP-NOW и LoRa). */
+const MODES: Record<Codec2Bitrate, number> = { 3200: 0, 1200: 5, 700: 8 };
 
 export interface Codec2Instance {
   readonly bitrate: Codec2Bitrate;

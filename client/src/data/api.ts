@@ -213,6 +213,19 @@ export function wsUrl(token: string): string {
   return `${proto}://${host}/ws?${q}`;
 }
 
+export type TopicMember = { userId: string; username: string; displayName: string };
+export type ChatTopic = {
+  id: string;
+  kind: 'text' | 'voice';
+  title: string;
+  position: number;
+  /** Автоматический голосовой топик группового звонка. */
+  auto: boolean;
+  callId: string | null;
+  members: TopicMember[];
+};
+export type TopicsState = { ok: true; enabled: boolean; topics: ChatTopic[] };
+
 async function req<T>(path: string, init: RequestInit = {}): Promise<T> {
   const isAuthCall = path.startsWith('/v1/auth/');
   // Проактивно обновляем токен за минуту до истечения.
@@ -1720,6 +1733,8 @@ export const api = {
     channel?: 'internet' | 'e-kmesh' | 'l-kmesh';
     region?: string;
     serverId?: string;
+    /** Ключ сеанса звонка на этом устройстве: другие устройства аккаунта из звонка выводятся. */
+    sessionKey?: string;
   }) =>
     req<{
       ok: true;
@@ -1731,9 +1746,32 @@ export const api = {
       token: string;
       members: string[];
     }>('/v1/calls/start', { method: 'POST', body: JSON.stringify(body) }),
+  /* ---- топики групп ---- */
+  getTopics: (chatId: string) => req<TopicsState>(`/v1/chats/${encodeURIComponent(chatId)}/topics`),
+  setTopicsEnabled: (chatId: string, enabled: boolean) =>
+    req<TopicsState>(`/v1/chats/${encodeURIComponent(chatId)}/topics-enabled`, { method: 'PUT', body: JSON.stringify({ enabled }) }),
+  createTopic: (chatId: string, kind: 'text' | 'voice', title: string) =>
+    req<TopicsState>(`/v1/chats/${encodeURIComponent(chatId)}/topics`, { method: 'POST', body: JSON.stringify({ kind, title }) }),
+  renameTopic: (topicId: string, title: string) =>
+    req<TopicsState>(`/v1/topics/${encodeURIComponent(topicId)}`, { method: 'PATCH', body: JSON.stringify({ title }) }),
+  deleteTopic: (topicId: string) => req<TopicsState>(`/v1/topics/${encodeURIComponent(topicId)}`, { method: 'DELETE' }),
+  topicVoiceJoin: (topicId: string, body: { sessionKey?: string; serverId?: string } = {}) =>
+    req<{
+      ok: true;
+      /** Автоматический голосовой топик — это групповой звонок: входим как в обычный. */
+      callId?: string;
+      topicId?: string;
+      chatId?: string;
+      title?: string;
+      server?: { id: string; url: string; domain: string; region: string };
+      roomName?: string;
+      token?: string;
+    }>(`/v1/topics/${encodeURIComponent(topicId)}/voice/join`, { method: 'POST', body: JSON.stringify(body) }),
+  topicVoiceLeave: (topicId: string) =>
+    req<{ ok: true }>(`/v1/topics/${encodeURIComponent(topicId)}/voice/leave`, { method: 'POST', body: '{}' }),
   callServers: () =>
     req<{ ok: true; servers: { id: string; domain: string; region: string; enabled: boolean; healthy: boolean }[] }>('/v1/calls/servers'),
-  callJoin: (callId: string) =>
+  callJoin: (callId: string, sessionKey?: string) =>
     req<{
       ok: true;
       callId: string;
@@ -1741,14 +1779,14 @@ export const api = {
       roomName: string;
       token: string;
       channel: string;
-    }>(`/v1/calls/${encodeURIComponent(callId)}/join`, { method: 'POST', body: '{}' }),
+    }>(`/v1/calls/${encodeURIComponent(callId)}/join`, { method: 'POST', body: JSON.stringify({ sessionKey }) }),
   /** Вход в звонок через E-kMesh: Hub регистрирует участника на kMesh audio gateway и выдаёт ключ голоса. */
-  callMeshJoin: (callId: string, bitrate: 3200 | 1200 = 3200, channel: 'e-kmesh' | 'l-kmesh' = 'e-kmesh') =>
+  callMeshJoin: (callId: string, bitrate: 3200 | 1200 | 700 = 700, channel: 'e-kmesh' | 'l-kmesh' = 'e-kmesh', sessionKey?: string) =>
     req<{
       ok: true;
       callId: string;
-      mesh: { key: string; keyId: number; scheme: number; codec: string; bitrate: 3200 | 1200; frameMs: number; batch: number; nodeId: number; channel?: 'e-kmesh' | 'l-kmesh' };
-    }>(`/v1/calls/${encodeURIComponent(callId)}/mesh/join`, { method: 'POST', body: JSON.stringify({ bitrate, channel }) }),
+      mesh: { key: string; keyId: number; scheme: number; codec: string; bitrate: 3200 | 1200 | 700; frameMs: number; batch: number; nodeId: number; channel?: 'e-kmesh' | 'l-kmesh' };
+    }>(`/v1/calls/${encodeURIComponent(callId)}/mesh/join`, { method: 'POST', body: JSON.stringify({ bitrate, channel, sessionKey }) }),
   callMeshLeave: (callId: string) =>
     req<{ ok: true }>(`/v1/calls/${encodeURIComponent(callId)}/mesh/leave`, { method: 'POST', body: '{}' }),
   callEnd: (callId: string) =>

@@ -8,8 +8,8 @@ import { randomBytes } from '../crypto/random';
 import { encodeEnvelope, decodeEnvelope, ENVELOPE_FLAG_VOICE } from '../kmesh/v2/envelope';
 
 export const SCHEME_CALL_AUDIO = 0x10;
-const CODEC_ID: Record<number, number> = { 3200: 0, 1200: 1 };
-const CODEC_BITRATE: Record<number, number> = { 0: 3200, 1: 1200 };
+const CODEC_ID: Record<number, number> = { 3200: 0, 1200: 1, 700: 2 };
+const CODEC_BITRATE: Record<number, number> = { 0: 3200, 1: 1200, 2: 700 };
 
 export function packAudio(bitrate: number, frameIdx: number, frames: Uint8Array[]): Uint8Array {
   const bpf = frames[0].length;

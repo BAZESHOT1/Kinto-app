@@ -1,3 +1,4 @@
+import { useCallStore } from '../../../src/call/callStore';
 import { DirectChatResolver, chatHref, directPeerFromParam } from '../../../src/components/chat/DirectChatResolver';
 import { safeBack } from '../../../src/navigation/safeBack';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -30,6 +31,9 @@ import { useLayoutInsets } from '../../../src/theme/useLayoutInsets';
 import { useShellMetrics } from '../../../src/components/AppShell';
 import { contentWidth, listBottomReserve, spacing } from '../../../src/theme/layout';
 import { Wallpaper } from '../../../src/components/Wallpaper';
+import { ActiveCallBanner } from '../../../src/components/chat/ActiveCallBanner';
+import { TopicsBar } from '../../../src/components/chat/TopicsBar';
+import { setSendTopic } from '../../../src/data/topicContext';
 import { ProgressiveBlur } from '../../../src/components/chat/ProgressiveBlur';
 import { Glass, GLASS_FILL_BUTTON } from '../../../src/components/Glass';
 import { useTheme } from '../../../src/theme/useTheme';
@@ -61,7 +65,7 @@ import { MediaAlbum } from '../../../src/components/chat/MediaAlbum';
 import { AttachmentMenu } from '../../../src/components/chat/AttachmentMenu';
 import { VoiceRecorder } from '../../../src/components/chat/VoiceRecorder';
 import { useChatMessages, humanError, useDeleteMessage, useSendChatMessage } from '../../../src/data/queries';
-import { useQueryClient } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   attachManyAndSendWithProgress,
   decryptEnvelopeAuto,
@@ -261,6 +265,13 @@ function ChatScreen({ forcedId }: { forcedId?: string } = {}) {
   const pendingScrollRef = useRef(false);
   /** Позиция при открытии выставляется один раз — иначе лента дёргается. */
   const initialScrollDoneRef = useRef(false);
+  // Лента скрыта (opacity 0), пока не встала на нужное место: диалог открывается сразу на новых сообщениях без «прыжка».
+  const myActiveCallId = useCallStore((st) => st.activeCallId);
+  // Топики группы (выключены по умолчанию): текстовые фильтруют ленту, голосовые — каналы звонков.
+  const [activeTopicId, setActiveTopicId] = useState<string | null>(null);
+  const [listShown, setListShown] = useState(false);
+  const revealList = useCallback(() => { requestAnimationFrame(() => setListShown(true)); }, []);
+  const initialIndexRef = useRef<number | undefined>(undefined);
   const lastReadReceiptRef = useRef('');
   const initialWindowRef = useRef(0);
   const userScrolledRef = useRef(false);
@@ -648,6 +659,23 @@ function ChatScreen({ forcedId }: { forcedId?: string } = {}) {
     return chat.myRole ?? rolesByUsername.get(myUsername) ?? null;
   }, [chat, rolesByUsername, myUsername]);
 
+  /* ------------------------------------------------------------- топики */
+  const topicsQuery = useQuery({
+    queryKey: ['topics', chatId],
+    queryFn: () => api.api.getTopics(chatId),
+    enabled: Boolean(chatId) && chat?.type === 'group',
+    staleTime: 15_000,
+  });
+  const topicsEnabled = topicsQuery.data?.enabled === true;
+  const topics = topicsQuery.data?.topics ?? [];
+  const canManageTopics = myRole === 'owner' || myRole === 'admin' || myRole === 'moderator';
+  const refreshTopics = useCallback(() => void topicsQuery.refetch(), [topicsQuery]);
+  useEffect(() => {
+    // Текущий топик попадает в header отправляемых сообщений (topicId); «Общий» — без него.
+    setSendTopic(chatId, topicsEnabled ? activeTopicId : null);
+    return () => setSendTopic(chatId, null);
+  }, [chatId, activeTopicId, topicsEnabled]);
+
   /** Owner/admin/mod с правом publish могут писать в канал от его имени. */
   const canPostAsChannel = useMemo(() => {
     if (!chat) return false;
@@ -802,6 +830,11 @@ function ChatScreen({ forcedId }: { forcedId?: string } = {}) {
   }, [(pushEvent?.payload as unknown as { id?: string })?.id]);
 
   /* -------------------------------------------------- группировка строк */
+  // Лента выбранного текстового топика; «Общий» (без выбора) показывает сообщения всех топиков.
+  const topicMessages = useMemo(
+    () => (activeTopicId ? allMessages.filter((m) => m.topicId === activeTopicId) : allMessages),
+    [allMessages, activeTopicId],
+  );
   const rows = useMemo<Row[]>(() => {
     const near = (a?: ViewMessage, b?: ViewMessage) =>
       !!a &&
@@ -817,14 +850,14 @@ function ChatScreen({ forcedId }: { forcedId?: string } = {}) {
     };
     const out: Row[] = [];
     let i = 0;
-    while (i < allMessages.length) {
-      const m = allMessages[i];
+    while (i < topicMessages.length) {
+      const m = topicMessages[i];
       // Альбом: ≥2 подряд идущих фото одного отправителя в окне 5 минут.
       if (isImage(m)) {
         const album: ViewMessage[] = [m];
         let j = i + 1;
-        while (j < allMessages.length) {
-          const next = allMessages[j];
+        while (j < topicMessages.length) {
+          const next = topicMessages[j];
           if (!isImage(next)) break;
           if (next.senderUsername !== m.senderUsername) break;
           if (Math.abs(new Date(next.createdAt).getTime() - new Date(m.createdAt).getTime()) >= 5 * 60_000) break;
@@ -837,14 +870,14 @@ function ChatScreen({ forcedId }: { forcedId?: string } = {}) {
           continue;
         }
       }
-      const first = !near(allMessages[i - 1], m);
-      const last = !near(allMessages[i + 1], m);
+      const first = !near(topicMessages[i - 1], m);
+      const last = !near(topicMessages[i + 1], m);
       const group: BubbleGroup = first && last ? 'single' : first ? 'first' : last ? 'last' : 'middle';
       out.push({ m, group });
       i += 1;
     }
     return out;
-  }, [allMessages]);
+  }, [topicMessages]);
 
   /* ------------------------------------------- пагинация истории вверх */
   const oldestSeq = useMemo(() => {
@@ -916,6 +949,8 @@ function ChatScreen({ forcedId }: { forcedId?: string } = {}) {
       ...rows.slice(boundary),
     ];
   }, [searchActive, matchedRows, rows, unreadCount, unreadReady]);
+  // Первый кадр ленты сразу у последнего сообщения (а не у самого старого), если сообщения уже есть.
+  if (initialIndexRef.current === undefined && visibleRows.length > 0) initialIndexRef.current = visibleRows.length - 1;
 
   useEffect(() => {
     setMatchIndex(normalizedQuery ? 0 : -1);
@@ -1008,8 +1043,8 @@ function ChatScreen({ forcedId }: { forcedId?: string } = {}) {
       // Один проход: повторные таймеры вместе с onContentSizeChange давали
       // несколько скачков ленты во время анимации перехода.
       const timer = setTimeout(() => {
-        if (userScrolledRef.current) return;
-        listRef.current?.scrollToIndex({ index: target, animated: false, viewPosition: 0.85 });
+        if (!userScrolledRef.current) listRef.current?.scrollToIndex({ index: target, animated: false, viewPosition: 0.85 });
+        revealList();
       }, 250);
       return () => clearTimeout(timer);
     }
@@ -1019,9 +1054,17 @@ function ChatScreen({ forcedId }: { forcedId?: string } = {}) {
       if (userScrolledRef.current) return;
       pendingScrollRef.current = false;
       scrollToEnd(false);
+      revealList();
     }, 200);
     return () => clearTimeout(timer);
   }, [chat, allMessages.length, scrollToEnd]);
+
+  // Пустой чат или долгая раскладка: показываем ленту в любом случае, чтобы она не оставалась скрытой.
+  useEffect(() => {
+    if (allMessages.length === 0) setListShown(true);
+    const t = setTimeout(() => setListShown(true), 1200);
+    return () => clearTimeout(t);
+  }, [chatId, allMessages.length === 0]);
 
   // Когда с сервера пришла полная лента, ещё раз встаём на последнее
   // прочитанное: кэш мог содержать только 8+8 сообщений.
@@ -1967,30 +2010,33 @@ function ChatScreen({ forcedId }: { forcedId?: string } = {}) {
           membersCount={chat?.membersCount}
         />
 
-        {activeCall ? (
-          <Pressable
-            onPress={() =>
-              router.push({
-                pathname: `/chat/${chatId}/call`,
-                params: { callId: activeCall.id, type: chat?.type ?? '', title: title || 'Звонок' },
-              } as never)
+        {topicsEnabled && chat?.type === 'group' ? (
+          <TopicsBar
+            topics={topics}
+            activeId={activeTopicId}
+            canManage={canManageTopics}
+            voiceActiveId={myActiveCallId?.startsWith('topic:') ? myActiveCallId.slice(6) : myActiveCallId}
+            onSelectText={(id) => setActiveTopicId(id)}
+            onJoinVoice={(t) =>
+              useCallStore.getState().openCall({ chatId, chatType: 'group', joinId: '', title: t.title, mesh: false, topicId: t.id })
             }
-            accessibilityRole="button"
-            accessibilityLabel="Присоединиться к звонку"
-            style={{
-              flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
-              paddingHorizontal: 14, paddingVertical: 10, marginHorizontal: 12, marginTop: 4,
-              borderRadius: 14, backgroundColor: theme.accentSoft,
+            onCreate={(kind, title) => void api.api.createTopic(chatId, kind, title).then(refreshTopics).catch(() => pushToast({ kind: 'error', message: 'Не удалось создать топик' }))}
+            onRename={(t, title) => void api.api.renameTopic(t.id, title).then(refreshTopics).catch(() => pushToast({ kind: 'error', message: 'Не удалось переименовать' }))}
+            onDelete={(t) => {
+              if (activeTopicId === t.id) setActiveTopicId(null);
+              void api.api.deleteTopic(t.id).then(refreshTopics).catch(() => pushToast({ kind: 'error', message: 'Не удалось удалить' }));
             }}
-          >
-            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-              <Ionicons name="call" size={16} color={theme.accent} />
-              <Text style={{ color: theme.accent, fontWeight: '700' }}>
-                Идёт звонок · {String(Math.floor(Math.max(0, Date.now() - activeCall.startedAt) / 60000)).padStart(2, '0')}:{String(Math.floor((Math.max(0, Date.now() - activeCall.startedAt) % 60000) / 1000)).padStart(2, '0')}
-              </Text>
-            </View>
-            <Text style={{ color: theme.accent, fontSize: 12.5, fontWeight: '700' }}>{activeCall.participants} уч. · Присоединиться</Text>
-          </Pressable>
+          />
+        ) : null}
+        {activeCall && !topicsEnabled ? (
+          <ActiveCallBanner
+            startedAt={activeCall.startedAt}
+            participants={activeCall.participants}
+            inCall={myActiveCallId === activeCall.id}
+            onPress={() =>
+              useCallStore.getState().openCall({ chatId, chatType: String(chat?.type ?? ''), joinId: activeCall.id, title: title || 'Звонок', mesh: false })
+            }
+          />
         ) : null}
 
 
@@ -2056,8 +2102,10 @@ function ChatScreen({ forcedId }: { forcedId?: string } = {}) {
           ) : searchActive && matchedRows.length === 0 ? (
             <EmptyState title="Ничего не найдено" subtitle={`По запросу «${searchQuery.trim()}» совпадений нет`} />
           ) : (
+            <View style={{ flex: 1, opacity: listShown ? 1 : 0 }}>
             <FlashList
               ref={listRef}
+              initialScrollIndex={initialIndexRef.current}
               onLayout={() => setTimeout(initialScrollToRead, 120)}
               data={visibleRows}
               keyExtractor={chatRowKey}
@@ -2127,6 +2175,7 @@ function ChatScreen({ forcedId }: { forcedId?: string } = {}) {
                 }, 160);
               }}
             />
+            </View>
           )}
 
           <ScrollToBottom
