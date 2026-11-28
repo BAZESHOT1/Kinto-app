@@ -11,6 +11,8 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import type { AvatarInfo } from '../data/api';
 import { useTheme } from '../theme/useTheme';
 import { loadAvatar } from './Avatar';
+import { parseProcedural } from '../backgrounds/catalog';
+import { ProceduralBackground } from '../backgrounds/ProceduralBackground';
 
 const PATTERN = require('../../assets/wallpaper-default.png');
 
@@ -62,8 +64,11 @@ export function Wallpaper({
   void wideShell;
   const bleedStyle = null;
   const theme = useTheme();
-  const loaded = useEncryptedImage(image);
+  const proc = parseProcedural(image);
+  const loaded = useEncryptedImage(proc ? null : image);
   const uri = previewUri ?? loaded;
+  // Процедурный фон (Aurora / Dither / Pixel Blast): рисуется шейдером, без загрузки изображения.
+  if (proc) return <ProceduralBackground settings={proc} dark={theme.dark} dim={previewUri ? 0 : Math.min(0.35, dim * 0.4)} />;
   // Чаты, каналы и группы без своего фона прозрачны: виден фон приложения.
   if (!uri && !pattern) return null;
   return (

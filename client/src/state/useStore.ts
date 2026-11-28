@@ -105,8 +105,21 @@ interface AppState {
   setChatPreview: (chatId: string, preview: ChatPreview) => void;
 }
 
+/** Тема читается синхронно при старте (web), иначе первый кадр рисуется светлой темой и часть строк остаётся с тёмным текстом. */
+function readStoredTheme(): ThemeName {
+  try {
+    if (typeof localStorage !== 'undefined') {
+      const v = localStorage.getItem('sg:theme');
+      if (v === 'dark' || v === 'light' || v === 'system') return v;
+    }
+  } catch {
+    /* хранилище недоступно */
+  }
+  return 'system';
+}
+
 export const useStore = create<AppState>((set, get) => ({
-  themeName: 'system',
+  themeName: readStoredTheme(),
   setThemeName: (themeName) => {
     set({ themeName });
     void kv.set('sg:theme', themeName);
