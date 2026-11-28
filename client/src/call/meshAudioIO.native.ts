@@ -24,9 +24,11 @@ export function createMeshAudioIO(): MeshAudioIO {
       const { AudioContext, AudioRecorder } = api;
       // Системный аудиосеанс: запись + воспроизведение, громкая связь по умолчанию для голоса.
       try {
-        api.AudioManager?.setSystemOptions?.({
-          ios: { category: 'playAndRecord', mode: 'voiceChat', options: ['defaultToSpeaker', 'allowBluetooth'] },
-        });
+        if (api.AudioManager?.setSystemOptions) {
+          api.AudioManager.setSystemOptions({ ios: { category: 'playAndRecord', mode: 'voiceChat', options: ['defaultToSpeaker', 'allowBluetooth'] } });
+        } else {
+          api.AudioManager?.setAudioSessionOptions?.({ iosCategory: 'playAndRecord', iosMode: 'voiceChat', iosOptions: ['defaultToSpeaker', 'allowBluetooth'] });
+        }
         await api.AudioManager?.requestRecordingPermissions?.();
         await api.AudioManager?.setAudioSessionActivity?.(true);
       } catch {
@@ -37,8 +39,7 @@ export function createMeshAudioIO(): MeshAudioIO {
       queue.connect(ctx.destination);
       queue.start();
 
-      recorder = new AudioRecorder();
-      recorder.onAudioReady({ sampleRate: RATE, bufferLength: CHUNK, channelCount: 1 }, (event: any) => {
+      const onReady = (event: any) => {
         const input: Float32Array = event.buffer.getChannelData(0);
         const pcm = new Int16Array(input.length);
         if (!muted) {
@@ -56,7 +57,15 @@ export function createMeshAudioIO(): MeshAudioIO {
           off += CHUNK;
         }
         acc = merged.slice(off);
-      });
+      };
+      // Старые версии библиотеки принимают параметры в конструкторе, новые — в onAudioReady.
+      if (AudioRecorder.length === 0 && api.AudioManager?.setSystemOptions) {
+        recorder = new AudioRecorder();
+        recorder.onAudioReady({ sampleRate: RATE, bufferLength: CHUNK, channelCount: 1 }, onReady);
+      } else {
+        recorder = new AudioRecorder({ sampleRate: RATE, bufferLengthInSamples: CHUNK });
+        recorder.onAudioReady(onReady);
+      }
       const res = await recorder.start();
       if (res && res.status === 'error') throw new Error(`mesh_audio_native_failed:${res.message ?? 'record'}`);
     },
