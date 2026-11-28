@@ -34,6 +34,7 @@ import { Wallpaper } from '../../../src/components/Wallpaper';
 import { ActiveCallBanner } from '../../../src/components/chat/ActiveCallBanner';
 import { TopicsBar } from '../../../src/components/chat/TopicsBar';
 import { HoldOverlay } from '../../../src/components/chat/HoldOverlay';
+import { hasRight } from '../../../src/components/chatinfo/ManageTypes';
 import { setSendTopic } from '../../../src/data/topicContext';
 import { ProgressiveBlur } from '../../../src/components/chat/ProgressiveBlur';
 import { Glass, GLASS_FILL_BUTTON } from '../../../src/components/Glass';
@@ -1680,6 +1681,27 @@ function ChatScreen({ forcedId }: { forcedId?: string } = {}) {
     pushToast({ kind: 'info', message: 'Отправка отменена' });
   }
 
+  /** Можно ли удалить сообщение у всех: своё, либо есть право «Удаление сообщений» (владелец/админ/модератор по матрице). */
+  function canDeleteForAll(m: ViewMessage): boolean {
+    if (m.mine) return true;
+    if (chat?.myRole === 'owner') return true;
+    return Boolean(chat && hasRight(chat as never, myUsername, 'deleteMessages'));
+  }
+
+  /** «Удалить у меня»: сообщение пропадает только у этого аккаунта — на всех его устройствах. */
+  function deleteForMe(m: ViewMessage) {
+    removeLocalMessage(m);
+    void deleteMsg.mutateAsync({ messageId: m.id, scope: 'me' }).catch(() => undefined);
+    pushToast({ kind: 'info', message: 'Удалено у вас' });
+  }
+
+  function deleteForAll(m: ViewMessage) {
+    void deleteMsg
+      .mutateAsync({ messageId: m.id, scope: 'all' })
+      .then(() => chatQuery.refetch())
+      .catch((e: unknown) => pushToast({ kind: 'error', message: humanError(e) }));
+  }
+
   function confirmDelete(m: ViewMessage) {
     setSheetMessage(null);
     // Только реально не ушедшее (локальный id) отменяем без вопросов; доставленное через
@@ -1688,19 +1710,7 @@ function ChatScreen({ forcedId }: { forcedId?: string } = {}) {
       void cancelPendingSend(m);
       return;
     }
-    const ownerOrAdmin = chat?.myRole === 'owner' || chat?.myRole === 'admin';
-    const canDeleteAll = m.mine || ownerOrAdmin;
-    if (chat?.type === 'channel') {
-      if (!canDeleteAll) {
-        pushToast({ kind: 'error', message: 'Удалять сообщения в канале может только владелец или администратор.' });
-        return;
-      }
-      void deleteMsg
-        .mutateAsync({ messageId: m.id, scope: 'all' })
-        .then(() => chatQuery.refetch())
-        .catch((e: unknown) => pushToast({ kind: 'error', message: humanError(e) }));
-      return;
-    }
+    const canDeleteAll = canDeleteForAll(m);
     const buttons: Array<{ text: string; style?: 'cancel' | 'destructive'; onPress?: () => void }> = [];
     if (canDeleteAll) {
       buttons.push({
@@ -2488,6 +2498,9 @@ function ChatScreen({ forcedId }: { forcedId?: string } = {}) {
                 onCopy={() => { if (sheetMessage) void copyMessageText(sheetMessage.text ?? ''); closeHoldMenu(); }}
                 onEdit={() => { if (sheetMessage) startEdit(sheetMessage); closeHoldMenu(); }}
                 onDelete={() => { if (sheetMessage) confirmDelete(sheetMessage); closeHoldMenu(); }}
+                canDeleteAll={Boolean(sheetMessage && canDeleteForAll(sheetMessage))}
+                onDeleteMe={() => { if (sheetMessage) deleteForMe(sheetMessage); closeHoldMenu(); }}
+                onDeleteAll={() => { if (sheetMessage) deleteForAll(sheetMessage); closeHoldMenu(); }}
                 onPin={() => { void pinMessage(sheetMessage); closeHoldMenu(); }}
                 onRetry={() => { if (sheetMessage) void retryMessage(sheetMessage); closeHoldMenu(); }}
                 onClose={closeHoldMenu}

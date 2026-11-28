@@ -10,14 +10,22 @@ import { useStore } from '../state/useStore';
 
 export type { Session } from '../crypto/core';
 
+/**
+ * Прямые адреса серверов кластера (DNS без Cloudflare, свой сертификат): если Cloudflare отправляет запрос на
+ * выключенный сервер или сам недоступен, клиент переключается на живой сервер напрямую. На каждом сервере
+ * этих доменов nginx проксирует /api, /v1 и /ws на локальный Hub (общая БД Patroni).
+ */
+export const DIRECT_ORIGINS = ['https://ru2.kintoapp.xyz', 'https://eu1.kintoapp.xyz', 'https://ru1.kintoapp.xyz'];
 const NATIVE_API_CANDIDATES = [
   // Основной домен Hub (за Cloudflare).
   'https://hub.kintoapp.xyz/api',
-  // Запасной домен: позже будет указывать на второй балансировщик нагрузки —
-  // клиент переключится на него, если основной домен недоступен.
+  ...DIRECT_ORIGINS.map((o) => `${o}/api`),
   'https://kintoapp.xyz/api',
 ];
 const DEFAULT_NATIVE_API = NATIVE_API_CANDIDATES[0];
+/** Web: сначала тот же origin (/api), затем прямые адреса серверов. */
+const WEB_API_CANDIDATES = ['/api', ...DIRECT_ORIGINS.map((o) => `${o}/api`)];
+const API_CANDIDATES = Platform.OS === 'web' ? WEB_API_CANDIDATES : NATIVE_API_CANDIDATES;
 const BASE = (process.env.EXPO_PUBLIC_API_URL ?? (Platform.OS === 'web' ? '/api' : DEFAULT_NATIVE_API)).replace(/\/+$/, '');
 
 /**
@@ -27,23 +35,22 @@ const BASE = (process.env.EXPO_PUBLIC_API_URL ?? (Platform.OS === 'web' ? '/api'
  */
 export let apiBase = BASE;
 const usingCustomBase = Boolean(process.env.EXPO_PUBLIC_API_URL);
-let candidateIndex = Math.max(0, NATIVE_API_CANDIDATES.indexOf(BASE));
+let candidateIndex = Math.max(0, API_CANDIDATES.indexOf(BASE));
 /** Когда переключились на запасной домен: через минуту снова пробуем основной. */
 let failoverAt = 0;
 function primaryIfDue(): void {
-  if (usingCustomBase || apiBase.startsWith('/') || candidateIndex === 0) return;
+  if (usingCustomBase || candidateIndex === 0) return;
   if (Date.now() - failoverAt < 60_000) return;
   candidateIndex = 0;
-  apiBase = NATIVE_API_CANDIDATES[0]!;
+  apiBase = API_CANDIDATES[0]!;
 }
 
 function nextApiBase(): string | null {
   if (usingCustomBase) return null;
-  if (apiBase.startsWith('/')) return null; // web — тот же origin
-  if (candidateIndex + 1 >= NATIVE_API_CANDIDATES.length) return null;
+  if (candidateIndex + 1 >= API_CANDIDATES.length) return null;
   candidateIndex += 1;
   failoverAt = Date.now();
-  return NATIVE_API_CANDIDATES[candidateIndex];
+  return API_CANDIDATES[candidateIndex];
 }
 
 /** Ошибки прокси/шлюза перед Hub: сервер перезапускается или не ответил вовремя. */
@@ -194,11 +201,12 @@ export function nodeUrl(url: string): string {
  * Запасной адрес WebSocket в обход Cloudflare (если сеть пользователя сбрасывает соединения до него):
  * тот же Hub напрямую по HTTPS с валидным сертификатом. Только для web-клиента на домене проекта.
  */
+let wsAltIndex = 0;
+/** Запасной адрес WebSocket: прямой сервер кластера (если Cloudflare/основной сервер недоступен). По кругу. */
 export function wsFallbackUrl(token: string): string | null {
-  if (typeof location === 'undefined' || !location.protocol.startsWith('https')) return null;
-  // Старый запасной адрес (nip.io:3443) убран вместе с прежним сервером.
-  void token;
-  return null;
+  const origin = DIRECT_ORIGINS[wsAltIndex % DIRECT_ORIGINS.length]!;
+  wsAltIndex += 1;
+  return `wss://${origin.replace(/^https?:\/\//, '')}/ws?token=${encodeURIComponent(token)}`;
 }
 
 export function wsUrl(token: string): string {
@@ -249,7 +257,7 @@ async function req<T>(path: string, init: RequestInit = {}): Promise<T> {
     if (init.body && !headers.has('content-type')) headers.set('content-type', 'application/json');
     beginRequest();
     const controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
-    const timer = controller ? setTimeout(() => controller.abort(), 12_000) : null;
+    const timer = controller ? setTimeout(() => controller.abort(), 9_000) : null;
     try {
       return await fetch(`${apiBase}${path}`, {
         ...init,

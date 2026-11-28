@@ -49,6 +49,9 @@ export function MessageActionSheet({
   anchor,
   inline = false,
   onLayoutHeight,
+  canDeleteAll = false,
+  onDeleteMe,
+  onDeleteAll,
 }: {
   message: ViewMessage | null;
   pinned: boolean;
@@ -67,8 +70,16 @@ export function MessageActionSheet({
   /** Встроенный режим: меню лежит в потоке оверлея и прокручивается вместе с сообщением. */
   inline?: boolean;
   onLayoutHeight?: (h: number) => void;
+  /** Можно ли удалить сообщение у всех (своё сообщение или права на удаление чужих). */
+  canDeleteAll?: boolean;
+  /** Удалить только у меня (на всех моих устройствах). */
+  onDeleteMe?: () => void;
+  /** Удалить у всех. */
+  onDeleteAll?: () => void;
 }) {
   const theme = useTheme();
+  const [deleteStage, setDeleteStage] = React.useState(false);
+  React.useEffect(() => { setDeleteStage(false); }, [message?.id]);
   const open = Boolean(message);
   const { width: screenW, height: screenH } = useWindowDimensions();
 
@@ -89,13 +100,22 @@ export function MessageActionSheet({
   if (canCopy) items.push({ key: 'copy', icon: 'copy-outline', label: 'Скопировать', onPress: onCopy });
   if (canEdit) items.push({ key: 'edit', icon: 'create-outline', label: 'Изменить', onPress: onEdit });
   if (canEdit) items.push({ key: 'pin', icon: pinned ? 'pin-outline' : 'pin', label: pinned ? 'Открепить' : 'Закрепить', onPress: onPin });
-  items.push({
-    key: 'delete',
-    icon: message?.pending || failed ? 'close-circle-outline' : 'trash-outline',
-    label: message?.pending || failed ? 'Убрать сообщение' : 'Удалить',
-    onPress: onDelete,
-    danger: true,
-  });
+  const pendingLike = Boolean(message?.pending || failed);
+  if (deleteStage) {
+    // Подменю «Удалить»: у меня / у всех.
+    items.length = 0;
+    items.push({ key: 'back', icon: 'chevron-back', label: 'Назад', onPress: () => setDeleteStage(false) });
+    items.push({ key: 'del-me', icon: 'eye-off-outline', label: 'Удалить у меня', onPress: onDeleteMe ?? onDelete, danger: true });
+    items.push({ key: 'del-all', icon: 'trash-outline', label: 'Удалить у всех', onPress: onDeleteAll ?? onDelete, danger: true });
+  } else if (pendingLike) {
+    items.push({ key: 'delete', icon: 'close-circle-outline', label: 'Убрать сообщение', onPress: onDelete, danger: true });
+  } else if (canDeleteAll && onDeleteAll) {
+    // Можно и у всех — «Удалить» открывает подменю.
+    items.push({ key: 'delete', icon: 'trash-outline', label: 'Удалить', onPress: () => setDeleteStage(true), danger: true });
+  } else {
+    // Удалить у всех нельзя (например, чужое сообщение в канале без прав администратора) — только у меня.
+    items.push({ key: 'delete', icon: 'eye-off-outline', label: 'Удалить у меня', onPress: onDeleteMe ?? onDelete, danger: true });
+  }
 
   const cardW = Math.min(276, screenW - 24);
   const cardH = HEADER_H + items.length * ROW_H + 12;
