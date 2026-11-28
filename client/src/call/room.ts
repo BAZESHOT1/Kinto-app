@@ -65,8 +65,14 @@ export async function joinCallRoom(opts: JoinOptions): Promise<CallRoomHandle> {
   // eslint-disable-next-line @typescript-eslint/no-require-imports
   const { ConnectionState, DisconnectReason, Room, RoomEvent, Track } = guarded(() => require('livekit-client') as typeof import('livekit-client'));
   console.log('[call] step audio-session');
-  await startCallAudioSession();
+  if (!callFlag('nosess')) await startCallAudioSession();
   const prefs = getAudioPrefs();
+  if (callFlag('lkdebug')) {
+    try {
+      const lk = require('livekit-client') as typeof import('livekit-client');
+      lk.setLogLevel(lk.LogLevel.trace);
+    } catch { /* диагностика */ }
+  }
   const room = new Room({
     adaptiveStream: false,
     // Web: громкость собеседников через WebAudio (GainNode) — доступно усиление выше 100 %.
@@ -175,7 +181,7 @@ export async function joinCallRoom(opts: JoinOptions): Promise<CallRoomHandle> {
     console.log('[call] step connect', opts.url);
     await room.connect(opts.url, opts.token, { autoSubscribe: true, peerConnectionTimeout: 30_000, websocketTimeout: 20_000 });
     console.log('[call] step microphone');
-    await room.localParticipant.setMicrophoneEnabled(true);
+    if (!callFlag('nomic')) await room.localParticipant.setMicrophoneEnabled(true);
     console.log('[call] step ready');
     // Настройки звука меняются во время звонка: перезапускаем захват микрофона с новыми ограничениями.
     if (!callFlag('nopw')) stopPrefsWatch = onAudioPrefsChanged(() => {
