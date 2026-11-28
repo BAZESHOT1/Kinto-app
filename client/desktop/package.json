@@ -1,7 +1,7 @@
 {
   "name": "kinto-desktop",
   "productName": "Kinto",
-  "version": "1.10.130",
+  "version": "1.10.131",
   "description": "Kinto для Windows",
   "author": "Kinto",
   "main": "main.js",

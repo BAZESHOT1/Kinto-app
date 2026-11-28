@@ -43,6 +43,23 @@ export function HoldOverlay({
   const [msgH, setMsgH] = React.useState(anchor?.height ?? 60);
   const [rH, setRH] = React.useState(58);
   const [aH, setAH] = React.useState(230);
+  // Расстановку выбираем ОДИН раз, когда измерены все три блока, и больше не меняем: иначе на границе «помещается / не помещается»
+  // меню перескакивало между двумя вариантами (мерцание, лишняя нагрузка, нажатия попадали мимо).
+  const measured = React.useRef({ r: false, a: false, m: false });
+  const lockedOrder = React.useRef<Array<'R' | 'M' | 'A'> | null>(null);
+  const [ready, setReady] = React.useState(false);
+  const anchorKey = anchor ? `${Math.round(anchor.x)}|${Math.round(anchor.y)}|${Math.round(anchor.height)}` : 'none';
+  React.useEffect(() => {
+    measured.current = { r: false, a: false, m: false };
+    lockedOrder.current = null;
+    setReady(false);
+  }, [anchorKey]);
+  const markReady = () => {
+    const m = measured.current;
+    if (m.r && m.a && m.m && !ready) setReady(true);
+  };
+  const onR = (h: number) => { measured.current.r = true; setRH((p) => (Math.abs(p - h) > 1 ? h : p)); markReady(); };
+  const onA = (h: number) => { measured.current.a = true; setAH((p) => (Math.abs(p - h) > 1 ? h : p)); markReady(); };
 
   const topInset = insets.top + 12;
   const bottomInset = insets.bottom + 12;
@@ -51,12 +68,17 @@ export function HoldOverlay({
   const spaceAbove = a.y - topInset;
   const spaceBelow = H - bottomInset - (a.y + msgH);
   let order: Array<'R' | 'M' | 'A'>;
-  if (spaceAbove >= rH + GAP) {
-    if (spaceBelow >= aH + GAP) order = ['R', 'M', 'A'];
-    else if (spaceAbove >= rH + aH + GAP * 2) order = ['A', 'R', 'M'];
-    else order = ['R', 'M', 'A'];
+  if (lockedOrder.current) {
+    order = lockedOrder.current;
   } else {
-    order = ['M', 'R', 'A'];
+    if (spaceAbove >= rH + GAP) {
+      if (spaceBelow >= aH + GAP) order = ['R', 'M', 'A'];
+      else if (spaceAbove >= rH + aH + GAP * 2) order = ['A', 'R', 'M'];
+      else order = ['R', 'M', 'A'];
+    } else {
+      order = ['M', 'R', 'A'];
+    }
+    if (ready) lockedOrder.current = order;
   }
   const size = { R: rH, M: msgH, A: aH };
   const above = order.slice(0, order.indexOf('M')).reduce((sum, k) => sum + size[k] + GAP, 0);
@@ -68,11 +90,11 @@ export function HoldOverlay({
 
   const fillDim = theme.dark ? 'rgba(0,0,0,0.45)' : 'rgba(255,255,255,0.38)';
   const parts: Record<'R' | 'M' | 'A', React.ReactNode> = {
-    R: <View key="R">{reactions(setRH)}</View>,
+    R: <View key="R">{reactions(onR)}</View>,
     M: (
       <View
         key="M"
-        onLayout={(e) => setMsgH(Math.round(e.nativeEvent.layout.height))}
+        onLayout={(e) => { measured.current.m = true; const h = Math.round(e.nativeEvent.layout.height); setMsgH((p) => (Math.abs(p - h) > 1 ? h : p)); markReady(); }}
         // Нажатие по сообщению не закрывает оверлей (иначе нельзя выделить текст); долгое нажатие по тексту — выделение.
         onStartShouldSetResponder={() => true}
         style={{ alignSelf: mine ? 'flex-end' : 'flex-start', maxWidth: '100%' }}
@@ -80,7 +102,7 @@ export function HoldOverlay({
         {bubble}
       </View>
     ),
-    A: <View key="A">{actions(setAH)}</View>,
+    A: <View key="A">{actions(onA)}</View>,
   };
 
   return (
@@ -109,7 +131,7 @@ export function HoldOverlay({
       >
         {/* Пустые места колонки тоже закрывают оверлей, а вложенные элементы получают свои нажатия. */}
         <Pressable onPress={onClose} accessible={false} style={{ gap: GAP }}>
-          <MotiView from={{ opacity: 0, translateY: 6 }} animate={{ opacity: 1, translateY: 0 }} transition={{ type: 'timing', duration: 140 }} style={{ gap: GAP }}>
+          <MotiView from={{ opacity: 0, translateY: 6 }} animate={{ opacity: ready ? 1 : 0, translateY: ready ? 0 : 6 }} transition={{ type: 'timing', duration: 140 }} style={{ gap: GAP }}>
             {order.map((k) => parts[k])}
           </MotiView>
         </Pressable>
