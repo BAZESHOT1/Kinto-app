@@ -174,6 +174,7 @@ async function doRegisterWebPush(
             body,
             icon: ICON,
             data,
+            tag: String(data?.messageId ?? data?.chatId ?? 'kinto'),
           });
           notification.onclick = () => {
             try {

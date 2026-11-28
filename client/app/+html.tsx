@@ -36,12 +36,19 @@ export default function Root({ children }: PropsWithChildren) {
     <style
       id="bg-root"
       dangerouslySetInnerHTML={{
-        __html: `html,body{margin:0;padding:0;background:#0A0E14;height:100%;-webkit-text-size-adjust:100%;text-size-adjust:100%;touch-action:manipulation}body{color:#E8F0FA;color-scheme:dark}#scaling-root{display:none}*,*::before,*::after{-webkit-tap-highlight-color:transparent}*{scrollbar-width:none}*::-webkit-scrollbar{width:0;height:0;display:none}@media (max-width:900px),(pointer:coarse){input,textarea,select{font-size:16px !important}html,body{touch-action:manipulation}}`,
+        __html: `html,body{margin:0;padding:0;background:#0A0E14;height:var(--app-h,100%);overflow:hidden;overscroll-behavior:none;-webkit-text-size-adjust:100%;text-size-adjust:100%;touch-action:manipulation}body{color:#E8F0FA;color-scheme:dark}#scaling-root{display:none}#root{height:100%}*,*::before,*::after{-webkit-tap-highlight-color:transparent}[role=button],[role=button] *,button,button *,[role=tab],[role=tab] *,a{-webkit-user-select:none;user-select:none;-webkit-touch-callout:none}*{scrollbar-width:none}*::-webkit-scrollbar{width:0;height:0;display:none}@media (max-width:900px),(pointer:coarse){input,textarea,select{font-size:16px !important}html,body{touch-action:manipulation}}`,
       }}
     />
         <ScrollViewStyleReset />
       </head>
-      <body>{children}</body>
+      <body>
+        {children}
+        <script
+          dangerouslySetInnerHTML={{
+            __html: `(function(){var d=document.documentElement;var standalone=function(){return navigator.standalone===true||(window.matchMedia&&matchMedia('(display-mode: standalone)').matches)};var fit=function(){var h=window.innerHeight;if(standalone()){var sh=window.screen&&window.screen.height||0,sw=window.screen&&window.screen.width||0;var full=window.innerHeight>=window.innerWidth?Math.max(sh,sw):Math.min(sh,sw);if(full>h&&full-h<200)h=full}d.style.setProperty('--app-h',h+'px')};var r=function(){if(window.scrollX||window.scrollY)window.scrollTo(0,0);if(d.scrollTop)d.scrollTop=0;if(document.body&&document.body.scrollTop)document.body.scrollTop=0;fit()};fit();window.addEventListener('scroll',r,{passive:true});window.addEventListener('resize',r);window.addEventListener('orientationchange',function(){setTimeout(r,200)});window.addEventListener('pageshow',function(){setTimeout(r,50)});document.addEventListener('visibilitychange',function(){setTimeout(r,100)});document.addEventListener('focusout',function(){setTimeout(r,60)});if(window.visualViewport)window.visualViewport.addEventListener('resize',r)})();`,
+          }}
+        />
+      </body>
     </html>
   );
 }

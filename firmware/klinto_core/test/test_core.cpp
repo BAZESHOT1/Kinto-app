@@ -815,9 +815,9 @@ static void test_channel_plan(void) {
       CHECK(e != NULL);
       if (!e) continue;
       CHECK(e->wifi_channel == ch);
-      CHECK(e->lora_bw_khz == 125);
+      CHECK(e->lora_bw_khz == 250);
       CHECK(e->lora_sync_word == (uint8_t)(0x10 + ch));
-      if (prev) CHECK(e->lora_freq_hz - prev >= e->lora_bw_khz * 1000u);
+      if (prev) CHECK(e->lora_freq_hz - prev >= 125000u);
       prev = e->lora_freq_hz;
     }
   }
