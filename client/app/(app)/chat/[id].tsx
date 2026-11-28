@@ -280,6 +280,8 @@ function ChatScreen({ forcedId }: { forcedId?: string } = {}) {
   // Топики группы (выключены по умолчанию): текстовые фильтруют ленту, голосовые — каналы звонков.
   const [activeTopicId, setActiveTopicId] = useState<string | null>(null);
   const [listShown, setListShown] = useState(false);
+  // Первые секунды после открытия держимся у конца ленты: оценка высот FlashList уточняется по мере отрисовки.
+  const stickEndUntilRef = useRef(Date.now() + 3000);
   const bottomHRef = useRef(0);
   const scrollToEndRef = useRef<(() => void) | null>(null);
   // Показываем ленту только когда известна высота поля ввода: иначе последнее сообщение оказывается под ним.
@@ -2156,6 +2158,9 @@ function ChatScreen({ forcedId }: { forcedId?: string } = {}) {
               }}
               onContentSizeChange={(_w, h) => {
                 contentHeightRef.current = h;
+                if (!userScrolledRef.current && !searchActive && Date.now() < stickEndUntilRef.current && Number(chat?.unread ?? 0) === 0 && !prependAnchorRef.current) {
+                  setTimeout(() => listRef.current?.scrollToEnd({ animated: false }), 0);
+                }
                 // После подгрузки старой истории компенсируем рост контента,
                 // чтобы список не «прыгал» вверх.
                 const anchor = prependAnchorRef.current;
