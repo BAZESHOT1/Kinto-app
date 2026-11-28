@@ -147,6 +147,16 @@ function ChatScreen({ forcedId }: { forcedId?: string } = {}) {
   const contentLeft = shell.wide ? Math.max(0, shell.paddingLeft - 12) : 0;
   const [topH, setTopH] = useState(0);
   const [bottomH, setBottomH] = useState(0);
+  useEffect(() => {
+    bottomHRef.current = bottomH;
+    if (bottomH <= 0) return undefined;
+    // Высота поля ввода изменилась: пока пользователь не листал и мы у конца — встаём на последнее сообщение заново.
+    const t = setTimeout(() => {
+      if (!userScrolledRef.current && atBottomRef.current !== false) scrollToEndRef.current?.();
+      requestAnimationFrame(() => setListShown(true));
+    }, 60);
+    return () => clearTimeout(t);
+  }, [bottomH]);
   /* ВАЖНО: queryClient должен быть объявлен до useCallback(commitToCache),
    * иначе на веб-сборке возникает TDZ ReferenceError при открытии чата. */
   const qc = useQueryClient();
@@ -270,7 +280,10 @@ function ChatScreen({ forcedId }: { forcedId?: string } = {}) {
   // Топики группы (выключены по умолчанию): текстовые фильтруют ленту, голосовые — каналы звонков.
   const [activeTopicId, setActiveTopicId] = useState<string | null>(null);
   const [listShown, setListShown] = useState(false);
-  const revealList = useCallback(() => { requestAnimationFrame(() => setListShown(true)); }, []);
+  const bottomHRef = useRef(0);
+  const scrollToEndRef = useRef<(() => void) | null>(null);
+  // Показываем ленту только когда известна высота поля ввода: иначе последнее сообщение оказывается под ним.
+  const revealList = useCallback(() => { requestAnimationFrame(() => { if (bottomHRef.current > 0) setListShown(true); }); }, []);
   const initialIndexRef = useRef<number | undefined>(undefined);
   const lastReadReceiptRef = useRef('');
   const initialWindowRef = useRef(0);
@@ -1008,6 +1021,7 @@ function ChatScreen({ forcedId }: { forcedId?: string } = {}) {
   const scrollToEnd = useCallback((animated = true) => {
     listRef.current?.scrollToEnd({ animated });
   }, []);
+  scrollToEndRef.current = () => listRef.current?.scrollToEnd({ animated: false });
 
   const initialScrollToRead = useCallback(() => {
     if (userScrolledRef.current || initialScrollDoneRef.current || Date.now() > initialWindowRef.current) return;
