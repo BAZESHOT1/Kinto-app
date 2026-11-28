@@ -3,15 +3,8 @@
  * различия сведены к audioSession.* (маршрутизация вывода на телефонах) и globals.* (WebRTC-глобали).
  */
 import { Platform } from 'react-native';
-import {
-  AudioPresets,
-  ConnectionState,
-  Participant,
-  RemoteTrack,
-  Room,
-  RoomEvent,
-  Track,
-} from 'livekit-client';
+import type { Participant, RemoteTrack, ConnectionState as LkConnectionState } from 'livekit-client';
+import { ensureCallGlobals } from './globals';
 import { setSpeakerphone, startCallAudioSession, stopCallAudioSession } from './audioSession';
 
 export type CallChannel = 'internet' | 'e-kmesh' | 'l-kmesh';
@@ -52,6 +45,10 @@ const view = (p: Participant, local: boolean): CallParticipantView => ({
 
 /** Подключиться к комнате: адрес сервера и токен выдаёт Hub (POST /v1/calls/start или /join). */
 export async function joinCallRoom(opts: JoinOptions): Promise<CallRoomHandle> {
+  // livekit-client грузится только в момент звонка (на телефонах — после регистрации WebRTC-глобалей).
+  ensureCallGlobals();
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const { AudioPresets, ConnectionState, Room, RoomEvent, Track } = require('livekit-client') as typeof import('livekit-client');
   await startCallAudioSession();
   const room = new Room({
     adaptiveStream: false,
@@ -92,7 +89,7 @@ export async function joinCallRoom(opts: JoinOptions): Promise<CallRoomHandle> {
     .on(RoomEvent.TrackMuted, emit)
     .on(RoomEvent.TrackUnmuted, emit)
     .on(RoomEvent.LocalTrackPublished, emit)
-    .on(RoomEvent.ConnectionStateChanged, (state: ConnectionState) => {
+    .on(RoomEvent.ConnectionStateChanged, (state: LkConnectionState) => {
       if (state === ConnectionState.Connected) opts.onPhase('connected');
       else if (state === ConnectionState.Reconnecting) opts.onPhase('reconnecting');
       else if (state === ConnectionState.Connecting) opts.onPhase('connecting');

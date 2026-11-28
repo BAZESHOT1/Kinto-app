@@ -629,7 +629,7 @@ function ChatInfoScreen({ forcedId }: { forcedId?: string } = {}) {
               </Text>
             </Pressable>
           ) : null}
-          {canStartCall && Platform.OS === 'web' ? (
+          {canStartCall && Platform.OS !== 'web' ? (
             <Pressable
               onPress={() => router.push(`/chat/${chatId}/call?type=${type || ''}&mesh=1` as never)}
               style={{ marginTop: 8, padding: 12, borderRadius: 12, flexDirection: 'row', alignItems: 'center', gap: 10, borderWidth: 1, borderColor: theme.line }}

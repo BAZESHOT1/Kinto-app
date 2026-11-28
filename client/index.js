@@ -2,7 +2,5 @@
 // закрыто, Android запускает JS без интерфейса, и экраны (где раньше подключался модуль push)
 // не загружаются — уведомление не показывалось.
 import './src/web/cleanUrl';
-// WebRTC-глобали LiveKit (только iOS/Android) — до любого кода звонков.
-import './src/call/globals';
 import './src/push/backgroundEntry';
 import 'expo-router/entry';

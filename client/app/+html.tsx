@@ -1,16 +1,17 @@
 import { ScrollViewStyleReset } from 'expo-router/html';
 import type { PropsWithChildren } from 'react';
+import splash from '../src/web/splashList.json';
 
 /** HTML-оболочка для web-сборки: тёмный фон по умолчанию, светлый включается из JS. */
 export default function Root({ children }: PropsWithChildren) {
   return (
-    <html lang="ru">
+    <html lang="ru" style={{ backgroundColor: '#000000', colorScheme: 'dark' }}>
       <head>
         <meta charSet="utf-8" />
         <meta httpEquiv="X-UA-Compatible" content="IE=edge" />
         <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
         <meta name="theme-color" content="#000000" />
-        <meta name="color-scheme" content="dark light" />
+        <meta name="color-scheme" content="dark" />
         <meta
           name="description"
           content="Kinto — приватный мессенджер на рое узлов: чаты, каналы, секретные диалоги и свои устройства хранения."
@@ -24,17 +25,25 @@ export default function Root({ children }: PropsWithChildren) {
         <link rel="icon" href="/favicon.ico?v=3" sizes="any" />
         <link rel="icon" type="image/svg+xml" href="/icon.svg?v=3" />
         <link rel="apple-touch-icon" href="/apple-touch-icon.png?v=3" />
+        {splash.map((x) => (
+          <link
+            key={x.file}
+            rel="apple-touch-startup-image"
+            href={x.file}
+            media={`(device-width: ${x.w}px) and (device-height: ${x.h}px) and (-webkit-device-pixel-ratio: ${x.dpr}) and (orientation: portrait)`}
+          />
+        ))}
         <link rel="icon" type="image/png" sizes="192x192" href="/icon-192.png?v=3" />
         <ScrollViewStyleReset />
         {/* Наш стиль ПОСЛЕ сброса expo-router — иначе его height:100% перебивает dvh. */}
         <style
           id="bg-root"
           dangerouslySetInnerHTML={{
-            __html: `html,body{margin:0;height:100%;box-sizing:border-box;overflow:hidden;overscroll-behavior:none}html{background:#000;color-scheme:dark}body{position:fixed;top:0;left:0;right:0;width:100%;height:var(--app-h,100%);padding:env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);background:#000;color:#E8F0FA;-webkit-text-size-adjust:100%;text-size-adjust:100%;touch-action:manipulation}body::after{content:'';position:fixed;left:0;right:0;bottom:-600px;height:600px;background:#000;pointer-events:none;z-index:-1}#root{display:flex;height:100%;width:100%;box-sizing:border-box;margin:0}#scaling-root{display:none}*,*::before,*::after{-webkit-tap-highlight-color:transparent}*{scrollbar-width:none}*::-webkit-scrollbar{width:0;height:0;display:none}@media (max-width:900px),(pointer:coarse){input,textarea,select{font-size:16px !important}}`,
+            __html: `html,body{margin:0;height:100%;box-sizing:border-box;overflow:hidden;overscroll-behavior:none}html{background:#000;color-scheme:dark}body{position:fixed;top:0;left:0;right:0;width:100%;height:var(--app-h,100%);padding:env(safe-area-inset-top) env(safe-area-inset-right) min(env(safe-area-inset-bottom),34px) env(safe-area-inset-left);background:#000;color:#E8F0FA;-webkit-text-size-adjust:100%;text-size-adjust:100%;touch-action:manipulation}body::after{content:'';position:fixed;left:0;right:0;bottom:-600px;height:600px;background:#000;pointer-events:none;z-index:-1}#root{display:flex;height:100%;width:100%;box-sizing:border-box;margin:0}#scaling-root{display:none}*,*::before,*::after{-webkit-tap-highlight-color:transparent}*{scrollbar-width:none}*::-webkit-scrollbar{width:0;height:0;display:none}@media (max-width:900px),(pointer:coarse){input,textarea,select{font-size:16px !important}}`,
           }}
         />
       </head>
-      <body>
+      <body style={{ backgroundColor: '#000000' }}>
         {children}
         {/* Документ не должен прокручиваться сам (фокус поля, клавиатура): сбрасываем сдвиг. */}
         <script

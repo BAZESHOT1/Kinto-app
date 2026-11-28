@@ -26,3 +26,17 @@ export function onKmeshDataPayload(listener: DataPayloadListener): () => void {
   dataListeners.add(listener);
   return () => { dataListeners.delete(listener); };
 }
+
+/** Сегменты длинных DATA (kMesh App Protocol). */
+const segListeners = new Set<(body: Uint8Array) => void>();
+
+export function emitKmeshDataSegment(body: Uint8Array): void {
+  for (const l of segListeners) {
+    try { l(body); } catch { /* слушатель не должен ломать канал */ }
+  }
+}
+
+export function onKmeshDataSegment(listener: (body: Uint8Array) => void): () => void {
+  segListeners.add(listener);
+  return () => { segListeners.delete(listener); };
+}

@@ -1,2 +1,2 @@
 // Web / Windows (браузерная оболочка): WebRTC уже есть в окружении, глобали регистрировать не нужно.
-export {};
+export function ensureCallGlobals(): void {}

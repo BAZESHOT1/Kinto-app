@@ -3,11 +3,13 @@
  */
 import React from 'react';
 import { PixelRatio, StyleSheet, View } from 'react-native';
-import { GLView } from 'expo-gl';
 import { baseCss, createRunner, type Runner } from './runner';
 import type { ProceduralSettings } from './catalog';
 
 export function ProceduralBackground({ settings, dark = true, dim = 0 }: { settings: ProceduralSettings; dark?: boolean; dim?: number }) {
+  // expo-gl подключается лениво — только когда реально показывается процедурный фон.
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const { GLView } = require('expo-gl') as typeof import('expo-gl');
   const stopRef = React.useRef<(() => void) | null>(null);
   React.useEffect(() => () => stopRef.current?.(), []);
 

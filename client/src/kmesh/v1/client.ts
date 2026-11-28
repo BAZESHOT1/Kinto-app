@@ -130,6 +130,8 @@ export interface KMeshV1ClientOptions {
    * конверт — приложение само выбирает ключ по scheme/keyId.
    */
   onDataPayload?: (envelope: DataEnvelope, packet: MeshPacket) => void;
+  /** kMesh App Protocol: сегмент длинного DATA «KS» (собирает приложение). */
+  onDataSegment?: (body: Uint8Array) => void;
   /** Прогресс записи кадра в BLE: байты и привязка к сообщению. */
   onSendProgress?: (event: {
     msgUuid: string;
@@ -900,6 +902,11 @@ export class KMeshV1Client {
             break;
           }
           if (op === RpcOp.DATA_PAYLOAD) {
+            const body = packet.payload.slice(2);
+            if (body.length > 6 && body[0] === 0x4b && body[1] === 0x53) {
+              this.opts.onDataSegment?.(body);
+              break;
+            }
             const envelope = parseDataPayloadRpc(packet.payload);
             if (envelope) this.opts.onDataPayload?.(envelope, packet);
             break;

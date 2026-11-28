@@ -37,7 +37,9 @@ const fmt = (sec: number) => `${String(Math.floor(sec / 60)).padStart(2, '0')}:$
 
 export default function CallScreen() {
   const params = useLocalSearchParams<{ id?: string; type?: string; callId?: string; title?: string; mesh?: string }>();
-  const meshMode = params.mesh === '1';
+  // Без интернета, но с подключённым модулем звонок автоматически идёт по kMesh (Codec2); только на телефонах/Windows-клиенте.
+  const offlineMesh = useStore.getState().transportOnline === false && Boolean(useStore.getState().transportModule);
+  const meshMode = Platform.OS !== 'web' && (params.mesh === '1' || offlineMesh);
   const router = useRouter();
   const theme = useTheme();
   const pushToast = useStore((s) => s.pushToast);
@@ -95,7 +97,7 @@ export default function CallScreen() {
         callIdRef.current = res.callId;
         setActiveCallId(res.callId);
         useCallStore.getState().setIncoming(null);
-        if (meshMode) {
+        if (meshMode && Platform.OS !== 'web') {
           // E-kMesh: голос идёт Codec2 через модуль, комната LiveKit подключается шлюзом на сервере.
           const m = await api.callMeshJoin(res.callId);
           meshRef.current = await startMeshVoice({ callId: res.callId, ...m.mesh });

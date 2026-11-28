@@ -1,210 +1,173 @@
 /**
- * HTTP-запросы через mesh-шлюз.
+ * API-запросы через kMesh — kMesh App Protocol поверх универсального DATA.
  *
- * Клиент шифрует запрос ключом устройства (meshRelayKey из сессии), шлюз
- * пересылает непрозрачный blob в Hub. Hub выполняет запрос и возвращает
- * зашифрованный ответ. Шлюз не видит ни токен, ни тело запроса.
+ * Клиент упаковывает обычный REST-запрос в конверт KM2 (scheme 2, ключ — session.meshRelayKey, AES-256-GCM),
+ * модули и шлюз переносят его как непрозрачные байты (длинные конверты режутся на сегменты «KS» по ≤192 байт),
+ * Hub исполняет запрос от имени пользователя и возвращает ответ тем же путём. Прошивка ничего не знает о
+ * содержимом: новый прикладной сценарий — это просто ещё один REST-эндпоинт на Hub.
+ *
+ * Ограничения (документированы в docs/kmesh-app-protocol.md): запрос ≤ 6 КБ, ответ ≤ 24 КБ (после deflate
+ * меньше), около 190 байт на пакет и несколько пакетов в секунду на узел, задержка 2–10 с, только /v1/*
+ * кроме auth/admin/firmware/kmesh/objects.
  */
+import { deflateSync, inflateSync } from 'fflate';
+import { gcm } from '@noble/ciphers/aes';
+import { sha256 } from '@noble/hashes/sha2';
 import { ApiError, getSession } from '../data/api';
-import { decryptJson, encryptJson, fromB64, toB64, utf8Encode } from '../crypto/core';
-import { onMeshEnvelope, sendViaMesh, canSendViaMesh, getMeshCapabilities } from './meshLink';
-
-interface Pending {
-  resolve: (value: MeshHttpResponse) => void;
-  reject: (error: Error) => void;
-  timer: ReturnType<typeof setTimeout>;
-  /** Повторная отправка, если часть чанков потерялась по дороге. */
-  resendTimer: ReturnType<typeof setTimeout> | null;
-  resends: number;
-  userId: string;
-  deviceId: string;
-}
+import { fromB64, utf8Decode, utf8Encode } from '../crypto/core';
+import { randomBytes } from '../crypto/random';
+import { decodeEnvelope, encodeEnvelope, SCHEME_SESSION } from '../kmesh/v2/envelope';
+import { onKmeshDataPayload, onKmeshDataSegment } from '../kmesh/v1/events';
+import { sendKmeshDataPayload } from '../kmesh/v1/runtime';
+import { canSendViaMesh, getMeshCapabilities } from './meshLink';
 
 export interface MeshHttpResponse {
   status: number;
   body: unknown;
 }
 
-const pending = new Map<string, Pending>();
-const assemblies = new Map<string, { total: number; parts: Map<number, string> }>();
+type Pending = { resolve: (v: MeshHttpResponse | null) => void; timer: ReturnType<typeof setTimeout> };
+const pending = new Map<number, Pending>();
+const assemblies = new Map<number, { total: number; parts: Map<number, Uint8Array>; at: number }>();
 let wired = false;
+let reqSeq = Math.floor(Math.random() * 60000);
+let segSeq = Math.floor(Math.random() * 60000);
 
-/** Переспросить потерянные чанки: не чаще двух раз, через 5 с без прогресса. */
-function armResend(id: string, item: Pending): void {
-  if (item.resendTimer) clearTimeout(item.resendTimer);
-  if (item.resends >= 2) {
-    item.resendTimer = null;
-    return;
-  }
-  item.resendTimer = setTimeout(() => {
-    item.resendTimer = null;
-    if (!pending.has(id)) return;
-    item.resends += 1;
-    void sendViaMesh('__http__', {
-      kind: 'http_resend',
-      id,
-      userId: item.userId,
-      deviceId: item.deviceId,
-    }).then((ok) => {
-      // Запрос ушёл — ждём ответ и при необходимости повторим ещё раз.
-      if (ok && pending.has(id)) armResend(id, item);
-    });
-  }, 5000);
+const SEGMENT_MAX = 192;
+const REQUEST_TIMEOUT_MS = 45_000;
+
+function keyIdFor(deviceId: string): number {
+  const h = sha256(utf8Encode(deviceId));
+  return (h[0] | (h[1] << 8) | (h[2] << 16) | (h[3] << 24)) >>> 0;
 }
 
-function clearTimers(item: Pending): void {
-  clearTimeout(item.timer);
-  if (item.resendTimer) clearTimeout(item.resendTimer);
-  item.resendTimer = null;
+/** Целый конверт → тела DATA: один пакет или сегменты «KS». */
+export function splitSegments(envelope: Uint8Array, msgId: number): Uint8Array[] {
+  if (envelope.length + 2 <= 200) return [envelope];
+  const total = Math.ceil(envelope.length / SEGMENT_MAX);
+  const out: Uint8Array[] = [];
+  for (let i = 0; i < total; i += 1) {
+    const chunk = envelope.subarray(i * SEGMENT_MAX, (i + 1) * SEGMENT_MAX);
+    const part = new Uint8Array(6 + chunk.length);
+    part.set([0x4b, 0x53, msgId & 0xff, (msgId >> 8) & 0xff, i, total], 0);
+    part.set(chunk, 6);
+    out.push(part);
+  }
+  return out;
+}
+
+function handleEnvelope(bytes: Uint8Array): void {
+  const session = getSession();
+  if (!session?.meshRelayKey) return;
+  const env = decodeEnvelope(bytes);
+  if (!env || env.scheme !== SCHEME_SESSION) return;
+  try {
+    const plain = gcm(fromB64(session.meshRelayKey), env.nonce).decrypt(env.ciphertext);
+    const body = plain[0] & 1 ? inflateSync(plain.subarray(1)) : plain.subarray(1);
+    const res = JSON.parse(utf8Decode(body)) as { i?: number; s?: number; b?: unknown };
+    const item = pending.get(Number(res.i));
+    if (!item) return;
+    pending.delete(Number(res.i));
+    clearTimeout(item.timer);
+    item.resolve({ status: Number(res.s) || 0, body: res.b });
+  } catch {
+    /* чужой/повреждённый ответ */
+  }
 }
 
 function wire(): void {
   if (wired) return;
   wired = true;
-  onMeshEnvelope((raw) => {
-    const env = raw as unknown as Record<string, any>;
-    if (env?.kind !== 'http_resp' || typeof env.id !== 'string') return;
-    const item = pending.get(env.id);
-    if (!item) return;
-
-    // Ответ приходит частями (mesh-кадр <= 280 байт base64-blob).
-    let packedText = typeof env.blob === 'string' ? String(env.blob) : '';
-    if (!packedText && typeof env.chunk === 'string') {
-      const total = Math.max(1, Number(env.total) || 1);
-      const part = Math.max(0, Number(env.part) || 0);
-      let assembly = assemblies.get(env.id);
-      if (!assembly || assembly.total !== total) {
-        assembly = { total, parts: new Map() };
-        assemblies.set(env.id, assembly);
-      }
-      assembly.parts.set(part, env.chunk);
-      if (assembly.parts.size < total) {
-        // Прогресс есть — отодвигаем переспрос; если чанк потерян,
-        // таймер сработает через 5 с и шлюз пришлёт ответ ещё раз.
-        armResend(env.id, item);
-        return;
-      }
-      const ordered: string[] = [];
-      for (let i = 0; i < total; i += 1) {
-        const chunk = assembly.parts.get(i);
-        if (chunk == null) return;
-        ordered.push(chunk);
-      }
-      assemblies.delete(env.id);
-      packedText = ordered.join('');
+  onKmeshDataPayload((env) => handleEnvelope(encodeEnvelope(env)));
+  onKmeshDataSegment((body) => {
+    const msgId = body[2] | (body[3] << 8);
+    const idx = body[4];
+    const total = body[5];
+    if (total < 2 || idx >= total) return;
+    let a = assemblies.get(msgId);
+    if (!a || a.total !== total) {
+      a = { total, parts: new Map(), at: Date.now() };
+      assemblies.set(msgId, a);
     }
-    if (!packedText) return;
-    pending.delete(env.id);
-    clearTimers(item);
-    void (async () => {
-      try {
-        const session = getSession();
-        if (!session?.meshRelayKey) throw new Error('no relay key');
-        const packed = JSON.parse(utf8Decode(fromB64(packedText)));
-        const data = await decryptJson<{ status: number; body: unknown }>(
-          fromB64(session.meshRelayKey),
-          String(packed.ciphertext || ''),
-          String(packed.nonce || ''),
-        );
-        item.resolve({ status: Number(data.status) || 0, body: data.body });
-      } catch (error) {
-        item.reject(error instanceof Error ? error : new Error(String(error)));
-      }
-    })();
+    a.parts.set(idx, body.slice(6));
+    if (a.parts.size < total) return;
+    assemblies.delete(msgId);
+    const chunks: Uint8Array[] = [];
+    for (let i = 0; i < total; i += 1) {
+      const c = a.parts.get(i);
+      if (!c) return;
+      chunks.push(c);
+    }
+    const whole = new Uint8Array(chunks.reduce((n, c) => n + c.length, 0));
+    let off = 0;
+    for (const c of chunks) { whole.set(c, off); off += c.length; }
+    handleEnvelope(whole);
   });
-}
-
-function utf8Decode(bytes: Uint8Array): string {
-  if (typeof TextDecoder !== 'undefined') return new TextDecoder().decode(bytes);
-  let out = '';
-  for (const b of bytes) out += String.fromCharCode(b);
-  try {
-    return decodeURIComponent(escape(out));
-  } catch {
-    return out;
-  }
+  // Неполные сегменты старше минуты удаляем.
+  setInterval(() => {
+    const now = Date.now();
+    for (const [id, a] of assemblies) if (now - a.at > 60_000) assemblies.delete(id);
+  }, 30_000);
 }
 
 /** Доступен ли туннель: есть ключ и подключённый модуль с шлюзом. */
 export function meshHttpAvailable(): boolean {
-  // Без подтверждённого шлюза запрос уйдёт в пустоту и провисит 35 с.
   return Boolean(getSession()?.meshRelayKey && canSendViaMesh() && getMeshCapabilities().gateway);
 }
 
 /**
- * Выполнить API-запрос через mesh. Возвращает null, если модуль/шлюз
- * недоступен или истёк таймаут — тогда вызывающий использует обычную ошибку.
+ * Выполнить API-запрос через mesh. Возвращает null, если туннель недоступен, запрос слишком велик
+ * или истёк таймаут — вызывающий покажет обычную сетевую ошибку.
  */
-export async function meshHttpFetch(
-  path: string,
-  init: RequestInit = {},
-): Promise<MeshHttpResponse | null> {
+export async function meshHttpFetch(path: string, init: RequestInit = {}): Promise<MeshHttpResponse | null> {
   const session = getSession();
   if (!session?.meshRelayKey) return null;
-  // Медиа/objects и служебные разделы Hub через mesh не проксируются.
-  // Не тратим 35 секунд на гарантированный 403.
-  if (/^\/v1\/(admin|auth|objects|uploads)\b/.test(path)) return null;
+  // Эти разделы через mesh не проксируются (Hub ответил бы 403): не тратим время.
+  if (/^\/v1\/(admin|auth|objects|uploads|firmware|kmesh)\b/.test(path)) return null;
   wire();
 
-  const id = `mh-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`;
   const method = String(init.method || 'GET').toUpperCase();
-  let body: unknown = null;
+  let body: unknown;
   if (typeof init.body === 'string' && init.body) {
     try { body = JSON.parse(init.body); } catch { body = init.body; }
   }
-  const key = fromB64(session.meshRelayKey);
-  const enc = await encryptJson(key, {
-    v: 1,
-    id,
-    ts: Date.now(),
-    method,
-    path,
-    body,
-  });
-  const blob = toB64(utf8Encode(JSON.stringify(enc)));
-  // Один mesh-кадр несёт не больше KL_MAX_PAYLOAD (1024); JSON-обёртка и
-  // base64 дают запас ~900 байт. Крупный POST не влезет — не ждём 35 с.
-  if (blob.length > 900) return null;
+  const reqId = (reqSeq = (reqSeq + 1) & 0xffff);
+  const json = utf8Encode(JSON.stringify({ i: reqId, m: method, p: path, ...(body === undefined ? {} : { b: body }) }));
+  const packed = deflateSync(json);
+  const useDeflate = packed.length < json.length;
+  const payload = new Uint8Array(1 + (useDeflate ? packed.length : json.length));
+  payload[0] = useDeflate ? 1 : 0;
+  payload.set(useDeflate ? packed : json, 1);
+  if (payload.length > 6 * 1024) return null;
 
-  const result = await new Promise<MeshHttpResponse | null>((resolve) => {
-    const timer = setTimeout(() => {
-      pending.delete(id);
-      assemblies.delete(id);
-      resolve(null);
-    }, 35_000);
-    const item: Pending = {
-      resolve,
-      reject: () => resolve(null),
-      timer,
-      resendTimer: null,
-      resends: 0,
-      userId: session.userId,
-      deviceId: session.deviceId,
-    };
-    pending.set(id, item);
-    void sendViaMesh('__http__', {
-      kind: 'http',
-      id,
-      userId: session.userId,
-      deviceId: session.deviceId,
-      blob,
-    }).then((ok) => {
-      if (!ok) {
-        clearTimers(item);
-        pending.delete(id);
-        resolve(null);
-        return;
-      }
-      // Ответ начинается не сразу: страхуемся от потери первых чанков.
-      armResend(id, item);
-    });
+  const nonce = randomBytes(12);
+  const cipher = gcm(fromB64(session.meshRelayKey), nonce).encrypt(payload);
+  const envelope = encodeEnvelope({
+    scheme: SCHEME_SESSION, flags: 0, keyId: keyIdFor(session.deviceId), nonce, ciphertext: cipher,
   });
-  return result;
+  const msgId = (segSeq = (segSeq + 1) & 0xffff);
+  const parts = splitSegments(envelope, msgId);
+
+  return new Promise<MeshHttpResponse | null>((resolve) => {
+    const timer = setTimeout(() => {
+      pending.delete(reqId);
+      resolve(null);
+    }, REQUEST_TIMEOUT_MS);
+    pending.set(reqId, { resolve, timer });
+    // Сегменты уходят подряд; BLE-канал модуля сам ставит их в очередь.
+    let ok = true;
+    for (const part of parts) ok = sendKmeshDataPayload(part, false) && ok;
+    if (!ok) {
+      clearTimeout(timer);
+      pending.delete(reqId);
+      resolve(null);
+    }
+  });
 }
 
 /** Превратить ответ туннеля в ApiError при не-2xx. */
 export function throwIfMeshError(response: MeshHttpResponse): void {
   if (response.status >= 200 && response.status < 300) return;
-  const body = (response.body ?? {}) as { error?: string; message?: string };
-  throw new ApiError(response.status, body.error ?? 'mesh_http_error', body.message ?? 'mesh_http_error');
+  const b = (response.body ?? {}) as { error?: string; message?: string };
+  throw new ApiError(response.status, b.error ?? 'mesh_http_error', b.message ?? 'mesh_http_error');
 }
