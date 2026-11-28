@@ -16,6 +16,8 @@
  */
 
 /** Магия начала кадра. */
+import { setMeshLinkState } from '../call/meshLinkState';
+
 export const FRAME_MAGIC = [0xa5, 0x5a] as const;
 /** Версия протокола. */
 export const PROTOCOL_VERSION = 1;
@@ -326,6 +328,10 @@ export interface ModuleInfoPayload {
   ownerNetId?: number;
   ownerPrefix?: string;
   bleMod6?: string;
+  /** Транспорт первого хопа до шлюза: 0 ESP-NOW, 1 LoRa, 254 — сам шлюз, 255 — шлюза не видно. */
+  gi?: number;
+  /** Нагрузка эфира за 10 с, %: [LoRa, ESP-NOW]. */
+  ld?: [number, number];
 }
 
 export interface EnvelopePayload {
@@ -390,6 +396,16 @@ export function parseModuleInfo(payload: Uint8Array): ModuleInfoPayload | null {
   const rawPublicId =
     source.publicId != null ? String(source.publicId) : source.public_id != null ? String(source.public_id) : '';
   const rawNodeId = source.nodeId ?? source.node_id;
+  // Состояние mesh-канала для выбора канала звонка (Интернет → E-kMesh → L-kMesh).
+  const ldRaw = Array.isArray(source.ld) ? (source.ld as unknown[]) : null;
+  if (source.gi != null || ldRaw) {
+    setMeshLinkState({
+      gateway: source.gateway === true || Number(source.gateway) === 1,
+      gwIface: num(source.gi, 255),
+      loraLoad: ldRaw ? Math.max(0, Math.min(100, num(ldRaw[0], 0))) : 0,
+      espnowLoad: ldRaw ? Math.max(0, Math.min(100, num(ldRaw[1], 0))) : 0,
+    });
+  }
   return {
     v: 1,
     kind: 'info',

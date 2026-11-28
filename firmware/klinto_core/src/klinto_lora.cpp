@@ -1,3 +1,4 @@
+#include "klinto_load.h"
 #include "klinto_lora.h"
 #include "klinto_channel_plan.h"
 
@@ -244,6 +245,7 @@ bool LoraInterface::trySendNow(const TxItem &item, uint32_t air_ms) {
       transmitting_ = false;
       if (state == RADIOLIB_ERR_NONE) {
         airtime_used_ms_ += air_ms;
+        kl_load_note(kl_load_meter(), KL_IFACE_LORA, air_ms * 1000u, millis());
         tx_packets_++;
         return true;
       }
@@ -278,6 +280,10 @@ void LoraInterface::taskLoop() {
           last_quality_ = (int8_t)kl_rssi_to_quality(rssi);
           rx_packets_++;
           good = true;
+          /* Нагрузка эфира: считаем все услышанные кадры (до фильтра next_hop). */
+          kl_load_note(kl_load_meter(), KL_IFACE_LORA,
+                       kl_lora_airtime_us(cfg_.lora.sf, (uint32_t)(cfg_.lora.bw_khz * 1000.0f), cfg_.lora.cr, cfg_.lora.preamble, (uint32_t)plen),
+                       millis());
           pushRx(buf, plen, rssi);
         }
       } else {

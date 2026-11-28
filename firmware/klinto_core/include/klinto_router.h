@@ -314,6 +314,7 @@ class KlintoRouter {
   uint32_t boot_ms_;
   kl_router_stats_t stats_;
   uint8_t last_tx_iface_ = KL_IFACE_ESPNOW;
+  uint32_t pick_hop_on_iface(uint8_t iface, const kl_packet_t *pkt, uint32_t current) const;
   KlintoLock lock_;
 };
 

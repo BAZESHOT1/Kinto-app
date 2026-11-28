@@ -18,6 +18,8 @@ export type MeshParams = {
   bitrate: 3200 | 1200;
   frameMs: number;
   batch: number;
+  /** Канал звонка: от него зависит транспорт голоса (строго LoRa или строго ESP-NOW). */
+  channel?: 'e-kmesh' | 'l-kmesh';
 };
 
 export type MeshVoiceHandle = { setMuted: (muted: boolean) => void; stop: () => void };
@@ -41,7 +43,7 @@ export async function startMeshVoice(params: MeshParams): Promise<MeshVoiceHandl
     if (!pending.length) return;
     const payload = packAudio(params.bitrate, pendingIdx, pending);
     pending = [];
-    sendKmeshDataPayload(sealCallAudio(key, params.keyId, payload), true);
+    sendKmeshDataPayload(sealCallAudio(key, params.keyId, payload), true, params.channel === 'l-kmesh' ? 'lora' : 'espnow');
   };
   await io.start((chunk) => {
     const merged = new Int16Array(acc.length + chunk.length);

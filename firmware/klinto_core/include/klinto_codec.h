@@ -54,6 +54,9 @@ enum kl_search_type_t : uint8_t {
 
 /** Флаги KL_RPC_DATA_PAYLOAD (прозрачны для прошивки). */
 #define KL_RPC_DP_FLAG_VOICE 0x01
+/** Только LoRa (L-kMesh) / только ESP-NOW (E-kMesh); вместе с VOICE. */
+#define KL_RPC_DP_FLAG_LORA 0x02
+#define KL_RPC_DP_FLAG_ESPNOW 0x04
 
 #define KL_SEARCH_MAX_RESULTS 5
 #define KL_FEED_MAX_ENTRIES 5

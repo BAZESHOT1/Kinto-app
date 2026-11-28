@@ -297,9 +297,9 @@ export class KMeshV1Client {
   sendDataPayload(
     envelope: Uint8Array,
     dstId: number,
-    opts: { voice?: boolean; toInternet?: boolean; msgUuid?: bigint } = {},
+    opts: { voice?: boolean; toInternet?: boolean; msgUuid?: bigint; iface?: 'lora' | 'espnow' | null } = {},
   ): Promise<boolean> {
-    const rpc = makeDataPayloadRpc(envelope, opts.voice ?? false);
+    const rpc = makeDataPayloadRpc(envelope, opts.voice ?? false, opts.iface ?? null);
     const flags = opts.toInternet ? PacketFlag.TO_INTERNET : 0;
     const up = encodeRpcUp(dstId >>> 0, flags, opts.msgUuid ?? 0n, rpc);
     return this.link.send(encodeClientFrame(ClientFrameType.RPC_UP, up, this.seq++));

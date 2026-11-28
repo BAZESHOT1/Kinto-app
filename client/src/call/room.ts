@@ -5,7 +5,7 @@
 import { Platform } from 'react-native';
 import type { Participant, RemoteTrack, ConnectionState as LkConnectionState } from 'livekit-client';
 import { createNoiseProcessor } from './noiseSuppression';
-import { ensureCallGlobals } from './globals';
+import { ensureCallGlobals, guarded } from './globals';
 import { setSpeakerphone, startCallAudioSession, stopCallAudioSession } from './audioSession';
 
 export type CallChannel = 'internet' | 'e-kmesh' | 'l-kmesh';
@@ -50,7 +50,7 @@ export async function joinCallRoom(opts: JoinOptions): Promise<CallRoomHandle> {
   console.log('[call] step globals');
   ensureCallGlobals();
   // eslint-disable-next-line @typescript-eslint/no-require-imports
-  const { AudioPresets, ConnectionState, Room, RoomEvent, Track } = require('livekit-client') as typeof import('livekit-client');
+  const { ConnectionState, Room, RoomEvent, Track } = guarded(() => require('livekit-client') as typeof import('livekit-client'));
   console.log('[call] step audio-session');
   await startCallAudioSession();
   const room = new Room({
@@ -59,8 +59,9 @@ export async function joinCallRoom(opts: JoinOptions): Promise<CallRoomHandle> {
     stopLocalTrackOnUnpublish: true,
     // Эквивалент getUserMedia({ audio: { noiseSuppression: true } }): web/Windows — браузерный движок,
     // iOS/Android — react-native-webrtc (noiseSuppression) поверх AVAudioSession voiceChat / NoiseSuppressor.
-    audioCaptureDefaults: { echoCancellation: true, noiseSuppression: true, autoGainControl: true, voiceIsolation: true },
-    publishDefaults: { audioPreset: AudioPresets.speech, dtx: true, red: true },
+    audioCaptureDefaults: { echoCancellation: true, noiseSuppression: true, autoGainControl: true, voiceIsolation: true, channelCount: 1, sampleRate: 48000 },
+    // Качество голоса по интернету: Opus 64 кбит/с (было 24 у пресета speech), без DTX (он «съедал» тихие слоги), с RED против потерь.
+    publishDefaults: { audioPreset: { maxBitrate: 64_000 }, dtx: false, red: true },
   });
 
   const audioEls = new Map<string, HTMLMediaElement>();

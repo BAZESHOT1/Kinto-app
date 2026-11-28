@@ -246,10 +246,34 @@ void KlintoRouter::expire(uint32_t now_ms) {
 
 /* ------------------------------------------------------------- sending --- */
 
+uint32_t KlintoRouter::pick_hop_on_iface(uint8_t iface, const kl_packet_t *pkt, uint32_t current) const {
+  const uint32_t to_gw = (pkt->dst_id == KL_ANY_GATEWAY_ID || (pkt->flags & KL_FLAG_TO_INTERNET)) ? 1u : 0u;
+  const kl_neighbor_t *best = nullptr;
+  for (uint16_t i = 0; i < KL_NEIGHBOR_TABLE; ++i) {
+    const kl_neighbor_t &n = neighbors_[i];
+    if (!n.used || n.iface != iface) continue;
+    if (n.node_id == current || n.node_id == pkt->dst_id) return n.node_id; /* уже слышим нужного соседа на этом транспорте */
+    if (to_gw && n.is_gateway) return n.node_id;
+    if (!best || n.hops < best->hops || (n.hops == best->hops && n.rssi > best->rssi)) best = &n;
+  }
+  /* Без соседа на этом транспорте — широковещательно: ближайший шлюз/узел на этом интерфейсе подхватит. */
+  return (best && !to_gw && best->hops == 0) ? best->node_id : KL_BROADCAST_ID;
+}
+
 bool KlintoRouter::transmit(const kl_packet_t *pkt, uint8_t iface, uint32_t next_hop,
                             uint32_t now_ms) {
   (void)now_ms;
   if (!sink_.send) return false;
+  /* Голос звонка со строгим транспортом: L-kMesh идёт только по LoRa, E-kMesh — только по ESP-NOW.
+   * Маршрут мог указать другой интерфейс — берём соседа на нужном (шлюз, адресат, лучший по RSSI) или broadcast. */
+  if (pkt->qos == KL_QOS_VOICE_LORA || pkt->qos == KL_QOS_VOICE_ESPNOW) {
+    const uint8_t forced = pkt->qos == KL_QOS_VOICE_LORA ? KL_IFACE_LORA : KL_IFACE_ESPNOW;
+    if (!(iface_mask_ & (1u << forced))) return false;
+    if (forced != iface) {
+      iface = forced;
+      next_hop = pick_hop_on_iface(forced, pkt, next_hop);
+    }
+  }
   if (!(iface_mask_ & (1u << iface))) return false;
   /* Переход LoRA: если полезная нагрузка больше поддерживаемого LoRA-пакета —
    * фрагментируем (ESP-NOW передаёт больше, ретрансляторы имеют возможность передать начало). */
@@ -271,6 +295,7 @@ bool KlintoRouter::transmit(const kl_packet_t *pkt, uint8_t iface, uint32_t next
       frag.next_hop_id = next_hop;
       frag.last_hop_id = cfg_.node_id;
       frag.type = pkt->type;
+      frag.qos = pkt->qos;
       frag.flags = (uint8_t)(pkt->flags | KL_FLAG_FRAGMENTED);
       frag.ttl = pkt->ttl;
       frag.hop_count = pkt->hop_count;

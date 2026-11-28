@@ -23,6 +23,7 @@
 #include "klinto_ota.h"
 #include "klinto_ota_patcher.h"
 #include "klinto_owner.h"
+#include "klinto_load.h"
 
 static int g_failures = 0;
 static int g_checks = 0;
@@ -1595,6 +1596,56 @@ static void test_multi_transport_bridge(void) {
   CHECK(w[R1].sent_count == 1 && w[R1].sent_iface[0] == KL_IFACE_LORA && w[R1].sent[0].ttl == 1);
 }
 
+/* ------------------------------------------------- нагрузка эфира и голос ----- */
+
+static void test_load_and_voice_iface(void) {
+  /* LoRa SF7/BW250/CR4/5, преамбула 8: 40-байтный кадр ~ 60 мс. */
+  const uint32_t air = kl_lora_airtime_us(7, 250000, 5, 8, 40);
+  CHECK(air > 40000u && air < 90000u);
+  CHECK(kl_lora_airtime_us(7, 250000, 5, 8, 100) > air);
+  CHECK(kl_lora_airtime_us(9, 250000, 5, 8, 40) > air * 3);
+
+  kl_load_meter_t m;
+  kl_load_reset(&m);
+  CHECK(kl_load_percent(&m, KL_IFACE_LORA, 5000) == 0);
+  /* 3 с эфира за 10 с окна = 30 %: каждую секунду по 300 мс. */
+  for (uint32_t t = 0; t < 10; ++t) kl_load_note(&m, KL_IFACE_LORA, 300000u, 1000u * t + 10u);
+  CHECK(kl_load_percent(&m, KL_IFACE_LORA, 9500) == 30);
+  CHECK(kl_load_percent(&m, KL_IFACE_ESPNOW, 9500) == 0);
+  /* Через 10 с тишины окно очищается. */
+  CHECK(kl_load_percent(&m, KL_IFACE_LORA, 25000) == 0);
+  /* Корзина не больше секунды: переполнение не даёт > 100 %. */
+  for (uint32_t t = 0; t < 10; ++t) kl_load_note(&m, KL_IFACE_ESPNOW, 5000000u, 40000u + 1000u * t);
+  CHECK(kl_load_percent(&m, KL_IFACE_ESPNOW, 49500) == 100);
+
+  /* Голос со строгим транспортом: маршрут выучен по ESP-NOW, но L-kMesh-пакет уходит по LoRa. */
+  kl_config_t cfg;
+  kl_config_defaults(&cfg);
+  cfg.node_id = 11;
+  cfg.role = KL_ROLE_CLIENT;
+  cfg.espnow_enabled = true;
+  cfg.lora_present = true;
+  FakeWorld world;
+  memset(&world, 0, sizeof(world));
+  kl_router_sink_t sink = {&world, fake_send, fake_deliver, fake_status, fake_archive, NULL, NULL};
+  KlintoRouter r;
+  r.init(&cfg, &sink);
+  CHECK(r.interface_mask() == (KL_IFACE_MASK_ESPNOW | KL_IFACE_MASK_LORA));
+
+  kl_packet_t voice;
+  kl_packet_init(&voice, KL_TYPE_DATA_PAYLOAD, 0, KL_BROADCAST_ID, 0, 0);
+  voice.qos = KL_QOS_VOICE_LORA;
+  const char body[] = "v";
+  kl_packet_set_payload(&voice, body, sizeof(body));
+  CHECK(r.send(&voice, 1000));
+  bool lora_only = world.sent_count > 0;
+  for (int i = 0; i < world.sent_count; ++i) {
+    if (world.sent[i].type == KL_TYPE_DATA_PAYLOAD && world.sent_iface[i] != KL_IFACE_LORA) lora_only = false;
+  }
+  CHECK(lora_only);
+  CHECK(KL_QOS_IS_VOICE(KL_QOS_VOICE_LORA) && KL_QOS_IS_VOICE(KL_QOS_VOICE_ESPNOW) && !KL_QOS_IS_VOICE(0));
+}
+
 int main(void) {
   setbuf(stdout, NULL);
   printf("Klinto mesh core tests\n");
@@ -1619,6 +1670,7 @@ int main(void) {
   test_presence_telemetry();
   test_owner_identity();
   test_multi_transport_bridge();
+  test_load_and_voice_iface();
   printf("%d checks, %d failures\n", g_checks, g_failures);
   return g_failures ? 1 : 0;
 }

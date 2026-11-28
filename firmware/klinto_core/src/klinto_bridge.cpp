@@ -1,3 +1,4 @@
+#include "klinto_load.h"
 #include "klinto_bridge.h"
 #include "klinto_codec.h"
 #include "klinto_crypto.h"
@@ -453,7 +454,11 @@ void KlintoClientBridge::handle_rpc_up(const uint8_t *payload, size_t len) {
   if (op == KL_RPC_DATA_PAYLOAD) {
     kl_packet_t pkt;
     kl_packet_init(&pkt, KL_TYPE_DATA_PAYLOAD, cfg_.node_id, dst, KL_BROADCAST_ID, 0);
-    pkt.qos = (rpc_len > 1 && (rpc[1] & KL_RPC_DP_FLAG_VOICE)) ? KL_QOS_VOICE : KL_QOS_NORMAL;
+    pkt.qos = KL_QOS_NORMAL;
+    if (rpc_len > 1 && (rpc[1] & KL_RPC_DP_FLAG_VOICE)) {
+      pkt.qos = (rpc[1] & KL_RPC_DP_FLAG_LORA) ? KL_QOS_VOICE_LORA
+                : (rpc[1] & KL_RPC_DP_FLAG_ESPNOW) ? KL_QOS_VOICE_ESPNOW : KL_QOS_VOICE;
+    }
     pkt.msg_uuid = uuid ? uuid : kl_snowflake_next(cfg_.node_id, kl_uptime_ms());
     if (!kl_packet_set_payload(&pkt, rpc, rpc_len)) {
       status(uuid, 0, KL_STATUS_FAILED);
@@ -696,7 +701,7 @@ bool KlintoClientBridge::send_info() {
       "{\"v\":3,\"kind\":\"info\",\"nodeId\":%lu,\"role\":%u,\"mtu\":%u,\"queue\":%u,"
       "\"gateway\":%s,\"ownerNetId\":%lu,\"ownerPrefix\":\"%s\",\"bleMod6\":\"%s\","
       "\"hardwareId\":\"%s\",\"firmware\":\"" KL_FIRMWARE_VERSION "\",\"build\":%u,\"battery\":%u,\"attached\":true,"
-      "\"bcn\":%lu,\"gwAge\":%ld,\"ch\":%u,\"mobile\":%u}",
+      "\"bcn\":%lu,\"gwAge\":%ld,\"ch\":%u,\"mobile\":%u,\"gi\":%u,\"ld\":[%u,%u]}",
       (unsigned long)cfg_.node_id, (unsigned)cfg_.role,
       (unsigned)(link_ ? link_->mtu() : 0), (unsigned)(outbox_ ? outbox_->count() : 0),
       gateway ? "true" : "false",
@@ -706,7 +711,12 @@ bool KlintoClientBridge::send_info() {
       (unsigned long)(router_ ? router_->beacons_rx() : 0),
       (long)(router_ ? router_->gateway_age_ms(kl_uptime_ms()) : -1),
       (unsigned)(router_ ? router_->channel() : 0),
-      (unsigned)((router_ && router_->mobile_gateway_active()) ? 1 : 0));
+      (unsigned)((router_ && router_->mobile_gateway_active()) ? 1 : 0),
+      /* gi: транспорт первого хопа до шлюза (0 ESP-NOW, 1 LoRa, 255 — шлюза не видно).
+       * ld: нагрузка эфира за 10 с, % — [LoRa, ESP-NOW]. */
+      (unsigned)((router_ && router_->gateway_route()->valid) ? router_->gateway_route()->iface : (gateway ? 254 : 255)),
+      (unsigned)kl_load_percent(kl_load_meter(), KL_IFACE_LORA, kl_uptime_ms()),
+      (unsigned)kl_load_percent(kl_load_meter(), KL_IFACE_ESPNOW, kl_uptime_ms()));
   if (n <= 0 || (size_t)n >= sizeof(info)) return false;
   /* Карта кластера: имя модуля и соседи, которых он слышит напрямую за последние 60 с.
    * nb: [[nodeId, rssi, flags]], flags: 1 — шлюз, 2 — по LoRa. */

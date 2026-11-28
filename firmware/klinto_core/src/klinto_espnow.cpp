@@ -1,3 +1,4 @@
+#include "klinto_load.h"
 #include "klinto_espnow.h"
 
 #if defined(ESP32)
@@ -104,6 +105,7 @@ void EspNowInterface::on_recv(const esp_now_recv_info_t *info, const uint8_t *da
   EspNowInterface *self = s_instance;
   if (!self || !data) return;
   self->rx_raw_++;
+  kl_load_note(kl_load_meter(), KL_IFACE_ESPNOW, kl_espnow_airtime_us((uint32_t)len), millis());
   if (len < (int)(KL_PACKET_HEADER_SIZE + 2)) { self->rx_bad_++; return; }
   if (data[0] != KL_PACKET_MAGIC || data[1] != KL_PACKET_VERSION) { self->rx_bad_++; return; }
   const uint8_t payload_len = data[34];

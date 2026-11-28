@@ -109,10 +109,11 @@ export function openEnvelope(key: Uint8Array, bytes: Uint8Array): Uint8Array | n
  * Упаковка в RPC_UP: [0x33][flags][envelope]. Прошивка читает только opcode
  * и flags (VOICE_PRIORITY), конверт не трогает.
  */
-export function makeDataPayloadRpc(envelope: Uint8Array, voice = false): Uint8Array {
+export function makeDataPayloadRpc(envelope: Uint8Array, voice = false, iface: 'lora' | 'espnow' | null = null): Uint8Array {
   const out = new Uint8Array(2 + envelope.length);
   out[0] = RpcOp.DATA_PAYLOAD;
-  out[1] = voice ? DATA_PAYLOAD_FLAG_VOICE : 0;
+  // Для голоса можно потребовать строгий транспорт: 0x02 — только LoRa (L-kMesh), 0x04 — только ESP-NOW (E-kMesh).
+  out[1] = voice ? DATA_PAYLOAD_FLAG_VOICE | (iface === 'lora' ? 0x02 : iface === 'espnow' ? 0x04 : 0) : 0;
   out.set(envelope, 2);
   return out;
 }

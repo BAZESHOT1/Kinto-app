@@ -39,6 +39,7 @@ import { Wallpaper } from '../../../src/components/Wallpaper';
 import * as api from '../../../src/data/api';
 import type { UserProfile } from '../../../src/data/api';
 import { useStore } from '../../../src/state/useStore';
+import { useCallStore } from '../../../src/call/callStore';
 import { formatBytes } from '../../../src/components/settings/SettingsWidgets';
 
 type EditField = 'displayName' | 'status' | 'bio' | 'location' | 'birthday';
@@ -316,7 +317,17 @@ export default function UserProfileScreen() {
       key: 'call',
       icon: 'call',
       label: 'позвонить',
-      onPress: () => pushToast({ kind: 'info', message: 'Звонки появятся в одном из следующих обновлений' }),
+      onPress: () => {
+        // Находим (или создаём) личный чат и запускаем звонок через глобальный хост звонков.
+        void (async () => {
+          try {
+            const chat = await api.api.createChat({ type: 'direct', username: profile.username } as never);
+            useCallStore.getState().openCall({ chatId: chat.id, chatType: 'direct', joinId: '', title: profile.displayName || profile.username, mesh: false });
+          } catch {
+            pushToast({ kind: 'error', message: 'Не удалось начать звонок' });
+          }
+        })();
+      },
     });
     moreActions.push({ key: 'share', icon: 'share-social-outline', label: 'Поделиться профилем', onPress: () => void share() });
     moreActions.push({ key: 'qr', icon: 'qr-code-outline', label: 'QR-код', onPress: () => setQrOpen(true) });

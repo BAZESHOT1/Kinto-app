@@ -14,6 +14,7 @@ import { useStore } from '../state/useStore';
 import { useCallStore, type CallSession } from './callStore';
 import { startMeshVoice, type MeshVoiceHandle } from './meshVoice';
 import { supportsSpeakerToggle } from './audioSession';
+import { chooseCallChannel, type ChannelChoice } from './meshLinkState';
 import {
   joinCallRoom,
   type CallParticipantView,
@@ -66,7 +67,14 @@ export function CallHost() {
 }
 
 function ActiveCall({ session }: { session: CallSession }) {
-  const meshMode = Platform.OS !== 'web' && (session.mesh || (useStore.getState().transportOnline === false && Boolean(useStore.getState().transportModule)));
+  // Приоритет канала: Интернет → E-kMesh (путь до Hub по ESP-NOW) → L-kMesh (путь по LoRa и нагрузка LoRa < 60 %).
+  const [choice] = React.useState<ChannelChoice>(() =>
+    Platform.OS === 'web'
+      ? { channel: 'internet', reason: 'Интернет' }
+      : chooseCallChannel(useStore.getState().transportOnline !== false, session.mesh),
+  );
+  const meshChannel = choice.channel === 'e-kmesh' || choice.channel === 'l-kmesh' ? choice.channel : null;
+  const meshMode = meshChannel !== null;
   const theme = useTheme();
   const insets = useSafeAreaInsets();
   const minimized = useCallStore((st) => st.minimized);
@@ -137,16 +145,21 @@ function ActiveCall({ session }: { session: CallSession }) {
         setPhase('ended');
         return;
       }
+      if (!choice.channel) {
+        setError(choice.reason);
+        setPhase('ended');
+        return;
+      }
       try {
-        const res = joinId ? await api.callJoin(joinId) : await api.callStart({ chatId: chatId || undefined, channel: 'internet', serverId: await pickReachableServer() });
+        const res = joinId ? await api.callJoin(joinId) : await api.callStart({ chatId: chatId || undefined, channel: meshChannel ?? 'internet', serverId: meshChannel ? undefined : await pickReachableServer() });
         if (cancelled) return;
         callIdRef.current = res.callId;
         setActiveCallId(res.callId);
         useCallStore.getState().setIncoming(null);
         if (meshMode && Platform.OS !== 'web') {
           // E-kMesh: голос идёт Codec2 через модуль, комната LiveKit подключается шлюзом на сервере.
-          const m = await api.callMeshJoin(res.callId);
-          meshRef.current = await startMeshVoice({ callId: res.callId, ...m.mesh });
+          const m = await api.callMeshJoin(res.callId, meshChannel === 'l-kmesh' ? 1200 : 3200, meshChannel === 'l-kmesh' ? 'l-kmesh' : 'e-kmesh');
+          meshRef.current = await startMeshVoice({ callId: res.callId, ...m.mesh, channel: meshChannel === 'l-kmesh' ? 'l-kmesh' : 'e-kmesh' });
           connectedAtRef.current = Date.now();
           useCallStore.getState().setConnectedAt(connectedAtRef.current);
           setPhase('connected');
@@ -272,7 +285,7 @@ function ActiveCall({ session }: { session: CallSession }) {
       <View style={styles.header}>
         <Text style={{ color: theme.textPrimary, fontSize: 22, fontWeight: '800' }} numberOfLines={1}>{title}</Text>
         <Text style={{ color: phase === 'reconnecting' || error ? theme.warning : theme.accent, fontSize: 16, marginTop: 6 }}>{status}</Text>
-        <Text style={{ color: theme.textSecondary, fontSize: 12, marginTop: 4 }}>{meshMode ? 'E-kMesh · Codec2 3200 бит/с' : 'Интернет · WebRTC · Opus'}</Text>
+        <Text style={{ color: theme.textSecondary, fontSize: 12, marginTop: 4 }}>{meshChannel === 'l-kmesh' ? 'L-kMesh · LoRa · Codec2 1200 бит/с' : meshChannel === 'e-kmesh' ? 'E-kMesh · ESP-NOW · Codec2 3200 бит/с' : 'Интернет · WebRTC · Opus'}</Text>
       </View>
 
       <ScrollView contentContainerStyle={styles.grid} showsVerticalScrollIndicator={false}>

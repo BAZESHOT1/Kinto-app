@@ -609,7 +609,7 @@ bool KlintoNode::sinkSend(void *ctx, const kl_packet_t *pkt, uint8_t iface, uint
   uint8_t priority = KL_PRIO_MEDIUM;
   /* kMesh v2: VOICE_PRIORITY в заголовке DATA_PAYLOAD — голос вытесняет
    * остальные очереди на LoRa/ESP-NOW; прошивка не заглядывает в конверт. */
-  if (pkt->qos == KL_QOS_VOICE) priority = KL_PRIO_HIGH;
+  if (KL_QOS_IS_VOICE(pkt->qos)) priority = KL_PRIO_HIGH;
   else if (pkt->type == KL_TYPE_ACK || pkt->type == KL_TYPE_RREP) priority = KL_PRIO_HIGH;
   else if (pkt->type == KL_TYPE_OTA_ANNOUNCE || pkt->type == KL_TYPE_OTA_CHUNK ||
            pkt->type == KL_TYPE_OTA_NACK) {

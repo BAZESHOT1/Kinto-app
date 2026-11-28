@@ -57,9 +57,9 @@ export async function requestKmeshFeed(lastSyncTs: number): Promise<boolean> {
  * Универсальный DATA_PAYLOAD (kMesh v2): непрозрачный конверт уходит через модуль и шлюз на Hub.
  * voice — приоритет голоса: прошивка вытесняет им остальные очереди, содержимое она не читает.
  */
-export function sendKmeshDataPayload(envelope: Uint8Array, voice = false): boolean {
+export function sendKmeshDataPayload(envelope: Uint8Array, voice = false, iface: 'lora' | 'espnow' | null = null): boolean {
   if (!active) return false;
-  void active.sendDataPayload(envelope, ANY_GATEWAY_ID, { voice, toInternet: true }).catch(() => false);
+  void active.sendDataPayload(envelope, ANY_GATEWAY_ID, { voice, toInternet: true, iface }).catch(() => false);
   return true;
 }
 

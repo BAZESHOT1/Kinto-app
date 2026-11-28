@@ -30,6 +30,10 @@ enum kl_packet_type_t : uint8_t {
 /** QoS в заголовке DATA_PAYLOAD: голос вытесняет остальные очереди. */
 #define KL_QOS_NORMAL 0
 #define KL_QOS_VOICE  2
+/** Голос звонка, строго по LoRa (L-kMesh) / строго по ESP-NOW (E-kMesh): прошивка выбирает транспорт сама. */
+#define KL_QOS_VOICE_LORA 3
+#define KL_QOS_VOICE_ESPNOW 4
+#define KL_QOS_IS_VOICE(q) ((q) == KL_QOS_VOICE || (q) == KL_QOS_VOICE_LORA || (q) == KL_QOS_VOICE_ESPNOW)
 
 enum kl_packet_flags_t : uint8_t {
   KL_FLAG_NEED_ACK = 0x01,

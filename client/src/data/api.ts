@@ -1743,12 +1743,12 @@ export const api = {
       channel: string;
     }>(`/v1/calls/${encodeURIComponent(callId)}/join`, { method: 'POST', body: '{}' }),
   /** Вход в звонок через E-kMesh: Hub регистрирует участника на kMesh audio gateway и выдаёт ключ голоса. */
-  callMeshJoin: (callId: string, bitrate: 3200 | 1200 = 3200) =>
+  callMeshJoin: (callId: string, bitrate: 3200 | 1200 = 3200, channel: 'e-kmesh' | 'l-kmesh' = 'e-kmesh') =>
     req<{
       ok: true;
       callId: string;
-      mesh: { key: string; keyId: number; scheme: number; codec: string; bitrate: 3200 | 1200; frameMs: number; batch: number; nodeId: number };
-    }>(`/v1/calls/${encodeURIComponent(callId)}/mesh/join`, { method: 'POST', body: JSON.stringify({ bitrate }) }),
+      mesh: { key: string; keyId: number; scheme: number; codec: string; bitrate: 3200 | 1200; frameMs: number; batch: number; nodeId: number; channel?: 'e-kmesh' | 'l-kmesh' };
+    }>(`/v1/calls/${encodeURIComponent(callId)}/mesh/join`, { method: 'POST', body: JSON.stringify({ bitrate, channel }) }),
   callMeshLeave: (callId: string) =>
     req<{ ok: true }>(`/v1/calls/${encodeURIComponent(callId)}/mesh/leave`, { method: 'POST', body: '{}' }),
   callEnd: (callId: string) =>
