@@ -9,6 +9,8 @@
 #include "klinto_util.h"
 #include "klinto_config.h"
 #include "klinto_packet.h"
+/* Типы 1/7 удалены: в тестах «обычный пакет» — DATA_PAYLOAD. */
+#define KL_TYPE_DATA KL_TYPE_DATA_PAYLOAD
 #include "klinto_codec.h"
 #include "klinto_crypto.h"
 #include "klinto_dedup.h"

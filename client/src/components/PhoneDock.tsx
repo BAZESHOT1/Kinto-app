@@ -92,6 +92,8 @@ export function PhoneDock() {
     return () => animation.stop();
   }, [pathname, hidden, reduced, enter]);
 
+  // Хук обязан вызываться до любых ранних return (иначе React error #300).
+  const insets = useLayoutInsets();
   if (hidden && !mounted) return null;
 
   const tiles = [
@@ -123,7 +125,6 @@ export function PhoneDock() {
   const onDockLayout = (e: LayoutChangeEvent) => setDockWidth(e.nativeEvent.layout.width);
   const enterTranslateY = enter.interpolate({ inputRange: [0, 1], outputRange: [16, 0] });
   // Единый источник: инсет снизу + зазор из layout-токенов.
-  const insets = useLayoutInsets();
   const dockBottom = insets.bottom + DOCK_BOTTOM_GAP;
 
   const userMatch = /^\/user\/([^/]+)(?:\/edit)?/.exec(pathname);

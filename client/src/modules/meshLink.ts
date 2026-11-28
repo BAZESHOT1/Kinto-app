@@ -101,7 +101,7 @@ async function flushV1Queue(): Promise<void> {
         activeClientId = undefined;
         emitQueue();
         // Доставлено по mesh — запомним для досылки в Hub, как только появится интернет.
-        queueMeshTextForServer({ chatId: item.chatId, text: item.text, clientId: item.clientId });
+        // Hub сохранил сообщение сам (kMesh App Protocol), досылка по HTTP не нужна.
         console.log('[kmesh]', 'queued text sent', item.chatId);
       } catch {
         item.attempts += 1;

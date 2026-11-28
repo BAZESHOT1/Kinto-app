@@ -354,7 +354,10 @@ export default function UserProfileScreen() {
   return (
     <>
       {/* Фон профиля неподвижен и занимает весь экран; без своего фото — прозрачный. */}
-      <Wallpaper image={profile.background ?? null} bleed />
+      {/* Фон выходит за отступы оболочки: на весь экран, на ПК — и под боковое меню. */}
+      <View pointerEvents="none" style={{ position: 'absolute', top: -shell.paddingTop, left: -shell.paddingLeft, right: -shell.paddingRight, bottom: 0 }}>
+        <Wallpaper image={profile.background ?? null} bleed />
+      </View>
       <ScrollView
         // Full-bleed: сдвигаем сам ScrollView (а не контент — тот обрезался бы его границей).
         style={{ marginTop: -shell.paddingTop }}

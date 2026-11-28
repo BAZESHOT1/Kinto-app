@@ -617,9 +617,6 @@ bool KlintoNode::sinkSend(void *ctx, const kl_packet_t *pkt, uint8_t iface, uint
   } else if (pkt->type == KL_TYPE_GW_BEACON || pkt->type == KL_TYPE_NODE_PRESENCE ||
            pkt->type == KL_TYPE_RREQ) {
     priority = KL_PRIO_LOW;
-  } else if (pkt->type == KL_TYPE_DATA &&
-             kl_rpc_priority_hint(pkt->payload, pkt->payload_len) == KL_PRIO_LOW) {
-    priority = KL_PRIO_LOW;
   }
   if (iface == KL_IFACE_LORA) {
     bool ok = self->lora_.sendPacket(wire, len, next_hop, priority);

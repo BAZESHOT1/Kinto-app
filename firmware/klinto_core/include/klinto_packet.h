@@ -11,19 +11,20 @@
 #include "klinto_util.h"
 
 enum kl_packet_type_t : uint8_t {
-  KL_TYPE_DATA = 1,
+  /* 1 (DATA) и 7 (SYNC_ARCHIVE) удалены: прикладной трафик — только DATA_PAYLOAD (12). */
   KL_TYPE_ACK = 2,
   KL_TYPE_RREQ = 3,
   KL_TYPE_RREP = 4,
   KL_TYPE_GW_BEACON = 5,
   KL_TYPE_NODE_PRESENCE = 6,
-  KL_TYPE_SYNC_ARCHIVE = 7,
   KL_TYPE_OTA_ANNOUNCE = 8,
   KL_TYPE_OTA_CHUNK = 9,
   KL_TYPE_OTA_NACK = 10,
   KL_TYPE_GW_PROBE = 11,
   /** kMesh v2: единый тип для ЛЮБОЙ полезной нагрузки (шифруется на уровне приложения). */
-  KL_TYPE_DATA_PAYLOAD = 12
+  KL_TYPE_DATA_PAYLOAD = 12,
+  /** Технический кадр: удалённая конфигурация узла (подписана, шифруется общим ключом соты). */
+  KL_TYPE_NODE_CONFIG = 13
 };
 
 /** QoS в заголовке DATA_PAYLOAD: голос вытесняет остальные очереди. */

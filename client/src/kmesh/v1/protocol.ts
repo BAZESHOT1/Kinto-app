@@ -18,15 +18,15 @@ export const BROADCAST_ID = 0xffffffff;
 export const ANY_GATEWAY_ID = 0x00000001;
 
 export const PacketType = {
-  DATA: 1,
   ACK: 2,
   RREQ: 3,
   RREP: 4,
   GW_BEACON: 5,
   NODE_PRESENCE: 6,
-  SYNC_ARCHIVE: 7,
   /** kMesh v2: единый тип для любой полезной нагрузки (прошивка не разбирает). */
   DATA_PAYLOAD: 12,
+  /** Технический кадр: удалённая конфигурация узла. Типы 1 (DATA) и 7 (SYNC_ARCHIVE) удалены. */
+  NODE_CONFIG: 13,
 } as const;
 
 /** QoS в заголовке v4: голос вытесняет остальные очереди. */

@@ -19,7 +19,7 @@ import { randomBytes } from '../crypto/random';
 import { decodeEnvelope, encodeEnvelope, SCHEME_SESSION } from '../kmesh/v2/envelope';
 import { onKmeshDataPayload, onKmeshDataSegment } from '../kmesh/v1/events';
 import { sendKmeshDataPayload } from '../kmesh/v1/runtime';
-import { canSendViaMesh, getMeshCapabilities } from './meshLink';
+import { canSendViaMesh, emitMeshEnvelope, getMeshCapabilities } from './meshLink';
 
 export interface MeshHttpResponse {
   status: number;
@@ -67,6 +67,11 @@ function handleEnvelope(bytes: Uint8Array): void {
     const res = JSON.parse(utf8Decode(body)) as { i?: number; s?: number; b?: unknown; e?: string };
     // Событие от Hub без запроса (например входящий звонок по kMesh).
     if (res.e) {
+      if (res.e === 'msg') {
+        // Новое сообщение от Hub по DATA: тот же формат, что раньше приходил через модуль.
+        emitMeshEnvelope(res as never);
+        return;
+      }
       if (res.e === 'call_in') {
         const ev = res as unknown as Record<string, unknown>;
         void import('../call/callStore').then((m) => m.handleCallIncomingEvent({ ...ev, type: 'call_incoming' }, session.userId));
@@ -182,4 +187,31 @@ export function throwIfMeshError(response: MeshHttpResponse): void {
   if (response.status >= 200 && response.status < 300) return;
   const b = (response.body ?? {}) as { error?: string; message?: string };
   throw new ApiError(response.status, b.error ?? 'mesh_http_error', b.message ?? 'mesh_http_error');
+}
+
+/**
+ * Текст без интернета: Hub сохраняет сообщение (шифрует серверным ключом чата) и рассылает его участникам.
+ * true — Hub подтвердил сохранение.
+ */
+export async function sendTextViaData(chatId: string, text: string, clientId?: string): Promise<boolean> {
+  const res = await meshHttpFetch(`/v1/chats/${encodeURIComponent(chatId)}/mesh-text`, {
+    method: 'POST',
+    body: JSON.stringify({ text, clientId }),
+  }).catch(() => null);
+  if (!res) return false;
+  if (res.status >= 200 && res.status < 300) return true;
+  // E2E-чат: Hub не шифрует за клиента — шифротекст собирает messaging.ts и отправляет sendEnvelopeViaData.
+  return false;
+}
+
+/** Готовый шифротекст сообщения (E2E или серверная схема) через DATA. */
+export async function sendEnvelopeViaData(
+  chatId: string,
+  input: { kind: string; nonce: string; ciphertext: string; scheme?: string; keyVersion?: number; clientId?: string; replyTo?: string },
+): Promise<boolean> {
+  const res = await meshHttpFetch(`/v1/chats/${encodeURIComponent(chatId)}/mesh-envelope`, {
+    method: 'POST',
+    body: JSON.stringify(input),
+  }).catch(() => null);
+  return Boolean(res && res.status >= 200 && res.status < 300);
 }

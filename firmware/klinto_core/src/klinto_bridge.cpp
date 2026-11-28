@@ -464,77 +464,15 @@ void KlintoClientBridge::handle_rpc_up(const uint8_t *payload, size_t len) {
     return;
   }
 
-  if (op == KL_RPC_SEND_TEXT) {
-    kl_rpc_text_t text;
-    char decoded[KL_MAX_TEXT + 1];
-    if (!kl_codec_decode_text(rpc, rpc_len, &text, decoded, sizeof(decoded))) {
-      status(uuid, 0, KL_STATUS_FAILED);
-      return;
-    }
-    plain_len = kl_codec_encode_text(plain, sizeof(plain), chat_ref, decoded, strlen(decoded),
-                                     text.rpc_flags);
-  } else {
-    if (rpc_len > sizeof(plain)) {
-      status(uuid, 0, KL_STATUS_FAILED);
-      return;
-    }
-    memcpy(plain, rpc, rpc_len);
-    plain_len = rpc_len;
-  }
-  if (!plain_len) {
-    status(uuid, 0, KL_STATUS_FAILED);
-    return;
-  }
-
-  kl_packet_t pkt;
-  const bool is_receipt = op == KL_RPC_MSG_RECEIPT;
-  const bool is_message = op == KL_RPC_SEND_TEXT || op == KL_RPC_SEND_ENVELOPE;
-  kl_packet_init(&pkt, KL_TYPE_DATA, cfg_.node_id, dst, KL_BROADCAST_ID,
-                 (uint8_t)(app_flags | (is_message ? KL_FLAG_NEED_ACK : 0) |
-                           KL_FLAG_TEMP_MESH_KEY |
-                           (dst != KL_BROADCAST_ID ? KL_FLAG_NEED_CLOUD_ARCHIVE : 0)));
-  pkt.msg_uuid = uuid ? uuid : ((is_message || is_receipt)
-                                    ? kl_snowflake_next(cfg_.node_id, kl_uptime_ms())
-                                    : 0);
-
-  if (cfg_.has_temp_key) {
-    kl_crypto_aad_t aad;
-    memset(&aad, 0, sizeof(aad));
-    aad.packet_id = pkt.packet_id;
-    aad.msg_uuid = pkt.msg_uuid;
-    aad.src_id = pkt.src_id;
-    aad.dst_id = pkt.dst_id;
-    aad.type = pkt.type;
-    aad.flags = pkt.flags;
-    aad.payload_len = (uint8_t)(KL_CRYPTO_HDR_LEN + plain_len + KL_TEMP_TAG_LEN);
-    size_t sealed_len = 0;
-    if (!kl_crypto_seal(cfg_.temp_mesh_key, &aad, plain, plain_len, KL_TEMP_TAG_LEN, pkt.payload,
-                        sizeof(pkt.payload), &sealed_len)) {
-      status(pkt.msg_uuid, pkt.packet_id, KL_STATUS_FAILED);
-      return;
-    }
-    pkt.payload_len = (uint8_t)sealed_len;
-  } else {
-#ifdef KL_ALLOW_PLAINTEXT_MESH
-    memcpy(pkt.payload, plain, plain_len);
-    pkt.payload_len = (uint8_t)plain_len;
-    pkt.flags = (uint8_t)(pkt.flags & ~KL_FLAG_TEMP_MESH_KEY);
-#else
-    log_line("mesh temp key is not provisioned; refusing to send");
-    dbg_line("[rpc] no temp key");
-    status(pkt.msg_uuid, pkt.packet_id, KL_STATUS_FAILED);
-    return;
-#endif
-  }
-
-  const bool sent = router_->send(&pkt, kl_uptime_ms(), 0xFF, true);
-  dbg_line("[rpc] send ok=%u plen=%u dst=%lu", sent ? 1u : 0u, (unsigned)pkt.payload_len,
-           (unsigned long)dst);
-  if (sent) {
-    status(pkt.msg_uuid, pkt.packet_id, KL_STATUS_QUEUED);
-  } else {
-    status(pkt.msg_uuid, pkt.packet_id, KL_STATUS_FAILED);
-  }
+  /* Легаси-RPC (SEND_TEXT/SEND_ENVELOPE/MSG_*, поиск, лента, история) и пакеты типов 1/7 удалены:
+   * прошивка переносит только непрозрачный DATA_PAYLOAD. Остальное делает приложение через Hub. */
+  (void)app_flags;
+  (void)rflags;
+  (void)chat_ref;
+  (void)plain;
+  (void)plain_len;
+  dbg_line("[rpc] unsupported op=%u (only DATA_PAYLOAD)", (unsigned)op);
+  status(uuid, 0, KL_STATUS_FAILED);
 }
 
 void KlintoClientBridge::deliver_mesh(const kl_packet_t *pkt) {
@@ -643,30 +581,14 @@ void KlintoClientBridge::deliver_mesh_reassembled(const kl_packet_t *pkt) {
     uint8_t op = 0, rflags = 0;
     uint16_t chat = KL_CODEC_NO_CHAT;
     if (!kl_codec_peek(plain, plain_len, &op, &rflags, &chat)) return;
-    if (op == KL_RPC_AUDIO_DOWN) {
-      /* Микс Hub → приложение: полезная нагрузка уже [seq u16][opus]. */
-      if (plain_len > KL_RPC_HEADER_SIZE) {
-        send_frame(KL_CF_AUDIO_DOWN, plain + KL_RPC_HEADER_SIZE,
-                   plain_len - KL_RPC_HEADER_SIZE, KL_CF_FLAG_URGENT);
-      }
-      return;
-    }
     if (op == KL_RPC_NODE_CONFIG) {
       if (sink_.remote_config && plain_len > KL_RPC_HEADER_SIZE) {
         sink_.remote_config(sink_.ctx, plain + KL_RPC_HEADER_SIZE, plain_len - KL_RPC_HEADER_SIZE);
       }
       return;
     }
-    if (op == KL_RPC_SEND_TEXT) {
-      kl_rpc_text_t text;
-      char decoded[KL_MAX_TEXT + 1];
-      if (!kl_codec_decode_text(plain, plain_len, &text, decoded, sizeof(decoded))) return;
-      out.payload_len = (uint8_t)kl_codec_encode_text(out.payload, sizeof(out.payload), text.chat_ref,
-                                                      decoded, strlen(decoded), text.rpc_flags);
-    } else {
-      memcpy(out.payload, plain, plain_len);
-      out.payload_len = (uint8_t)plain_len;
-    }
+    memcpy(out.payload, plain, plain_len);
+    out.payload_len = (uint8_t)plain_len;
     out.flags = (uint8_t)(out.flags & ~(KL_FLAG_TEMP_MESH_KEY | KL_FLAG_COMPRESSED_UNISHOX));
   }
 

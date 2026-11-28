@@ -140,6 +140,7 @@ function ChatScreen({ forcedId }: { forcedId?: string } = {}) {
   const reduced = useReducedMotion();
   const insets = useLayoutInsets();
   const shell = useShellMetrics();
+  const contentLeft = shell.wide ? Math.max(0, shell.paddingLeft - 12) : 0;
   const [topH, setTopH] = useState(0);
   const [bottomH, setBottomH] = useState(0);
   /* ВАЖНО: queryClient должен быть объявлен до useCallback(commitToCache),
@@ -1918,7 +1919,8 @@ function ChatScreen({ forcedId }: { forcedId?: string } = {}) {
           // оболочка — без магических чисел и без привязки к pathname.
           marginTop: -shell.paddingTop,
           // На широком экране диалог остаётся правее боковой панели (12 px зазор), а не уходит под неё.
-          marginLeft: shell.wide ? -12 : -shell.paddingLeft,
+          // Фон заходит под боковое меню; сам диалог (шапка/список/ввод) остаётся правее него (contentLeft).
+          marginLeft: -shell.paddingLeft,
           marginRight: -shell.paddingRight,
           // Акцентная рамка вокруг экрана секретного чата.
           borderWidth: secret ? 1.5 : 0,
@@ -1930,7 +1932,7 @@ function ChatScreen({ forcedId }: { forcedId?: string } = {}) {
         <View
           pointerEvents="box-none"
           onLayout={(e) => setTopH(Math.round(e.nativeEvent.layout.height))}
-          style={{ position: 'absolute', top: 0, left: 0, right: 0, zIndex: 20 }}
+          style={{ position: 'absolute', top: 0, left: contentLeft, right: 0, zIndex: 20 }}
         >
           <ProgressiveBlur edge="top" height={topH + 26} />
         <View style={{ paddingTop: shell.wide ? 0 : shell.insets.top }} pointerEvents="box-none">
@@ -2033,7 +2035,7 @@ function ChatScreen({ forcedId }: { forcedId?: string } = {}) {
         </View>
         </View>
 
-        <View style={StyleSheet.absoluteFill}>
+        <View style={{ position: 'absolute', top: 0, bottom: 0, right: 0, left: contentLeft }}>
           {(chatQuery.isLoading || !chat) && allMessages.length === 0 ? (
             <MotiView
               from={{ opacity: 0, translateY: 6 }}
@@ -2144,7 +2146,7 @@ function ChatScreen({ forcedId }: { forcedId?: string } = {}) {
         <View
           pointerEvents="box-none"
           onLayout={(e) => setBottomH(Math.round(e.nativeEvent.layout.height))}
-          style={{ position: 'absolute', bottom: 0, left: 0, right: 0, zIndex: 20 }}
+          style={{ position: 'absolute', bottom: 0, left: contentLeft, right: 0, zIndex: 20 }}
         >
         <ProgressiveBlur edge="bottom" height={bottomH + 26} />
         {/* «печатает» показываем только в шапке чата — дубль над композером убран. */}

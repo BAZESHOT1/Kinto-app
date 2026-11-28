@@ -712,7 +712,7 @@ void KlintoRouter::on_packet(const kl_packet_t *pkt, uint8_t iface, int16_t rssi
   const bool for_me = kl_packet_is_for(pkt, cfg_.node_id, gateway_like());
   if (!for_me && gateway_like() && pkt->msg_uuid != 0 &&
       (pkt->flags & KL_FLAG_NEED_CLOUD_ARCHIVE) &&
-      (pkt->type == KL_TYPE_DATA || pkt->type == KL_TYPE_SYNC_ARCHIVE)) {
+      (pkt->type == KL_TYPE_DATA_PAYLOAD)) {
     if (sink_.archive) sink_.archive(sink_.ctx, pkt);
   }
   if (for_me) {
@@ -770,9 +770,8 @@ void KlintoRouter::on_packet(const kl_packet_t *pkt, uint8_t iface, int16_t rssi
         return;
       case KL_TYPE_GW_BEACON:
         break;
-      case KL_TYPE_DATA:
-      case KL_TYPE_SYNC_ARCHIVE:
       case KL_TYPE_DATA_PAYLOAD:
+      case KL_TYPE_NODE_CONFIG:
         stats_.delivered++;
         if (pkt->flags & KL_FLAG_NEED_ACK) send_ack(pkt, iface, now_ms);
         if (sink_.deliver) sink_.deliver(sink_.ctx, pkt, rssi, iface);

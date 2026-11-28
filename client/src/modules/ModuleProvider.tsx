@@ -259,23 +259,10 @@ export function ModuleProvider({ children }: { children: React.ReactNode }) {
       // Транспорт уже открыт — сразу разрешаем отправку, не дожидаясь
       // остальных шагов adopt (они могут подвиснуть на сети/сервисе).
       setMeshSender((chatId, envelope) => transport.sendEnvelope(chatId, envelope));
+      // Сообщения без интернета идут универсальным DATA (kMesh App Protocol), а не пакетами прошивки.
       setMeshV1Sender(async (chatId, text, clientId) => {
-        const client = v1ClientRef.current;
-        if (!client) return false;
-        try {
-          const result = await client.sendText({
-            chatId,
-            chatRef: crc16(new TextEncoder().encode(chatId)) || 1,
-            peerNodeId: 1,
-            text,
-            toInternet: Boolean(useStore.getState().transportOnline) || Boolean(infoRef.current?.gateway),
-            allowPlaintext: isPublicChannel(chatId),
-            clientId,
-          });
-          return result.state !== 'FAILED';
-        } catch {
-          return false;
-        }
+        const m = await import('./meshHttp');
+        return m.sendTextViaData(chatId, text, clientId);
       });
       console.log('[module]', 'senders ready', kind);
       if (mountedRef.current) {
@@ -774,25 +761,8 @@ export function ModuleProvider({ children }: { children: React.ReactNode }) {
         mobileGatewayRef.current?.stop();
         mobileGatewayRef.current = startMobileGateway(v1);
         setMeshV1Sender(async (chatId, text, clientId) => {
-          try {
-            void api.kmeshV1RegisterRef(chatId).catch(() => undefined);
-            const result = await v1.sendText({
-              chatId,
-              chatRef: refOf(chatId),
-              peerNodeId: 1,
-              text,
-              toInternet: Boolean(useStore.getState().transportOnline) || Boolean(infoRef.current?.gateway),
-            allowPlaintext: isPublicChannel(chatId),
-              clientId,
-            });
-            return result.state !== 'FAILED';
-          } catch (error) {
-            console.warn('[kmesh]', 'sendTextViaMesh failed', String(error));
-            return false;
-          } finally {
-            // Гарантия сохранения: сразу пробуем выгрузить подписанную копию.
-            setTimeout(() => void v1.syncOutbox().catch(() => undefined), 700);
-          }
+          const m = await import('./meshHttp');
+          return m.sendTextViaData(chatId, text, clientId);
         });
         void v1.hello();
         void v1.syncOutbox().catch(() => undefined);
