@@ -405,6 +405,10 @@ export interface User {
   usedBytes: number;
   credits: number;
   invitePrivacy?: string;
+  /** Кто может звонить: everyone | chats | nobody. */
+  callPrivacy?: 'everyone' | 'chats' | 'nobody';
+  notifyGroupCalls?: boolean;
+  notifyGroupCallsInApp?: boolean;
   /* ---- расширенный профиль ---- */
   avatar?: AvatarInfo | null;
   /** Фон профиля (зашифрованное изображение на узлах). */
@@ -1101,6 +1105,9 @@ export const api = {
           /** Короткий статус профиля (до 80 символов); пустая строка — сброс. */
           status?: string;
           invitePrivacy?: 'everyone' | 'shared' | 'chat' | 'nobody';
+          callPrivacy?: 'everyone' | 'chats' | 'nobody';
+          notifyGroupCalls?: boolean;
+          notifyGroupCallsInApp?: boolean;
           links?: ProfileLink[];
           location?: string;
           birthday?: string | null;

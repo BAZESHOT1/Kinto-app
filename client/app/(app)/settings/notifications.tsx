@@ -15,7 +15,7 @@ import {
   SettingsToggle,
 } from '../../../src/components/settings/SettingsUI';
 import { SettingsRowsSkeleton } from '../../../src/components/skeletons/PageSkeletons';
-import { useChats } from '../../../src/data/queries';
+import { useChats, useMe, useUpdateProfile } from '../../../src/data/queries';
 import { api } from '../../../src/data/api';
 import { kv } from '../../../src/crypto/storage';
 import { useStore } from '../../../src/state/useStore';
@@ -82,6 +82,18 @@ export default function NotificationsScreen() {
     'sg:notify-hide-content',
     'sg-notify-hide-content-changed',
     false,
+  );
+  // Групповые звонки: push и карточка внутри приложения отключаются на сервере (PATCH /v1/me).
+  const meQuery = useMe();
+  const updateMe = useUpdateProfile();
+  const meExt = meQuery.data as unknown as { notifyGroupCalls?: boolean; notifyGroupCallsInApp?: boolean } | undefined;
+  const groupCallsPush = meExt?.notifyGroupCalls !== false;
+  const groupCallsInApp = meExt?.notifyGroupCallsInApp !== false;
+  const setGroupCalls = React.useCallback(
+    (patch: { notifyGroupCalls?: boolean; notifyGroupCallsInApp?: boolean }) => {
+      void updateMe.mutateAsync(patch as unknown as { displayName?: string }).catch(() => undefined);
+    },
+    [updateMe],
   );
   const [pushStatus, setPushStatus] = React.useState<string>('не запрошено');
   React.useEffect(() => {
@@ -167,6 +179,28 @@ export default function NotificationsScreen() {
           {hideContent
             ? 'Текст и имя отправителя не показываются на экране блокировки и в шторке.'
             : 'Уведомления показывают отправителя, группу/канал и текст сообщения.'}
+        </Text>
+      </SettingsSection>
+
+      <SettingsSection title="Групповые звонки" delay={45}>
+        <GlassCard>
+          <SettingsToggle
+            icon="call-outline"
+            title="Push о групповых звонках"
+            subtitle="Системное уведомление, когда в группе начинается звонок"
+            value={groupCallsPush}
+            onValueChange={(v) => setGroupCalls({ notifyGroupCalls: v })}
+          />
+          <SettingsToggle
+            icon="albums-outline"
+            title="Карточка звонка в приложении"
+            subtitle="Показывать входящий групповой звонок поверх экрана"
+            value={groupCallsInApp}
+            onValueChange={(v) => setGroupCalls({ notifyGroupCallsInApp: v })}
+          />
+        </GlassCard>
+        <Text style={{ color: theme.textSecondary, fontSize: 12, lineHeight: 17, marginTop: 8, paddingHorizontal: 4 }}>
+          Личные звонки это не затрагивает. Присоединиться к идущему звонку можно из самого чата.
         </Text>
       </SettingsSection>
 

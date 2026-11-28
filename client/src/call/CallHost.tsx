@@ -29,6 +29,7 @@ const ERRORS: Record<string, string> = {
   call_ended: 'Звонок уже завершён',
   call_full: 'В звонке нет свободных мест',
   call_forbidden: 'У вас нет доступа к этому звонку',
+  call_not_allowed: 'Пользователю нельзя позвонить, лучше напишите сообщение',
 };
 
 const fmt = (sec: number) => `${String(Math.floor(sec / 60)).padStart(2, '0')}:${String(sec % 60).padStart(2, '0')}`;

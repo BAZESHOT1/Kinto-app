@@ -1,6 +1,6 @@
 {
   "name": "@klinto/client",
-  "version": "1.10.114",
+  "version": "1.10.115",
   "private": true,
   "main": "index.js",
   "scripts": {
@@ -64,7 +64,6 @@
     "react": "18.3.1",
     "react-dom": "18.3.1",
     "react-native": "0.76.9",
-    "react-native-audio-api": "^0.8.2",
     "react-native-background-fetch": "^4.2.5",
     "react-native-ble-plx": "^3.5.1",
     "react-native-gesture-handler": "~2.20",

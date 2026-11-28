@@ -31,6 +31,18 @@ function probeWebInsets(): LayoutInsets | null {
   return out;
 }
 
+/**
+ * Баг iOS 26.x в PWA: env(safe-area-inset-top) = 0, а окно короче экрана на высоту статус-бара (~59 px),
+ * из-за чего шапки уезжают под статус-бар. Тогда верхний отступ берём из этой разницы.
+ */
+function iosPwaTopFallback(): number {
+  if (typeof window === 'undefined' || typeof navigator === 'undefined') return 0;
+  const standalone = (navigator as unknown as { standalone?: boolean }).standalone === true;
+  if (!standalone || !/iPhone|iPad/.test(navigator.userAgent)) return 0;
+  const gap = Math.max(window.screen?.height ?? 0, window.screen?.width ?? 0) - window.innerHeight;
+  return gap >= 40 && gap <= 90 ? Math.round(gap) : 0;
+}
+
 function useWebInsets(): LayoutInsets {
   const [v, setV] = React.useState<LayoutInsets>(() => probeWebInsets() ?? ZERO);
   React.useEffect(() => {
@@ -58,8 +70,9 @@ export function useLayoutInsets(): LayoutInsets {
   const web = useWebInsets();
   if (Platform.OS !== 'web') return native;
   // Берём большее из двух источников: любой из них может оказаться нулевым.
+  const fallbackTop = web.top === 0 && native.top === 0 ? iosPwaTopFallback() : 0;
   return {
-    top: Math.max(web.top, native.top),
+    top: Math.max(web.top, native.top, fallbackTop),
     right: Math.max(web.right, native.right),
     bottom: Math.max(web.bottom, native.bottom),
     left: Math.max(web.left, native.left),

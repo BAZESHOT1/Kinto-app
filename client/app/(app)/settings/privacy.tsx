@@ -38,6 +38,13 @@ const INVITE_OPTIONS: { value: InvitePrivacy; title: string; subtitle: string }[
   { value: 'nobody', title: 'Никто', subtitle: 'Вас нельзя добавить в группу или канал напрямую' },
 ];
 
+type CallPrivacy = 'everyone' | 'chats' | 'nobody';
+const CALL_OPTIONS: { value: CallPrivacy; title: string; subtitle: string }[] = [
+  { value: 'everyone', title: 'Все', subtitle: 'Вам может позвонить любой пользователь' },
+  { value: 'chats', title: 'С кем есть чат', subtitle: 'Только те, с кем у вас есть личный чат' },
+  { value: 'nobody', title: 'Никто', subtitle: 'Звонки в личных чатах отключены: вам предложат написать сообщение' },
+];
+
 export default function PrivacyScreen() {
   const theme = useTheme();
   const reduced = useReducedMotion();
@@ -163,6 +170,49 @@ export default function PrivacyScreen() {
             </Text>
           </>
         )}
+      </SettingsSection>
+
+      <SettingsSection title="Кто может мне звонить" delay={60}>
+        <GlassCard>
+          {CALL_OPTIONS.map((option, index) => {
+            const current = (me.data as unknown as { callPrivacy?: CallPrivacy } | undefined)?.callPrivacy ?? 'everyone';
+            const selected = current === option.value;
+            return (
+              <Pressable
+                key={option.value}
+                onPress={() => {
+                  if (selected || updateProfile.isPending) return;
+                  updateProfile
+                    .mutateAsync({ callPrivacy: option.value } as unknown as { displayName?: string })
+                    .then(() => pushToast({ kind: 'success', message: 'Настройка звонков сохранена' }))
+                    .catch((e: unknown) => pushToast({ kind: 'error', message: humanError(e) }));
+                }}
+                accessibilityRole="radio"
+                accessibilityState={{ selected }}
+                accessibilityLabel={`${option.title}. ${option.subtitle}`}
+                style={({ pressed }) => [
+                  styles.inviteRow,
+                  {
+                    backgroundColor: selected ? theme.accentSoft : pressed ? theme.surfacePressed : 'transparent',
+                    borderTopColor: theme.line,
+                    borderTopWidth: index === 0 ? 0 : StyleSheet.hairlineWidth,
+                  },
+                ]}
+              >
+                <View style={[styles.radio, { borderColor: selected ? theme.accent : theme.line, backgroundColor: selected ? theme.accent : 'transparent' }]}>
+                  {selected ? <Ionicons name="checkmark" size={14} color={theme.onAccent} /> : null}
+                </View>
+                <View style={{ flex: 1, minWidth: 0 }}>
+                  <Text style={{ color: theme.textPrimary, fontSize: 14.5, fontWeight: '600' }} numberOfLines={1}>{option.title}</Text>
+                  <Text style={{ color: theme.textSecondary, fontSize: 12, marginTop: 1.5 }} numberOfLines={2}>{option.subtitle}</Text>
+                </View>
+              </Pressable>
+            );
+          })}
+        </GlassCard>
+        <Text style={{ color: theme.textSecondary, fontSize: 12, lineHeight: 17, marginTop: 8, paddingHorizontal: 4 }}>
+          Если звонить вам нельзя, звонящий увидит: «Пользователю нельзя позвонить, лучше напишите сообщение».
+        </Text>
       </SettingsSection>
 
       <SettingsSection title="Заблокированные пользователи" delay={120} right={<Text style={{ color: theme.textDisabled, fontSize: 12 }}>{rows.length}</Text>}>

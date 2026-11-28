@@ -8,6 +8,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import { MotiView } from 'moti';
 import { useTheme } from '../theme/useTheme';
+import { useLayoutInsets } from '../theme/useLayoutInsets';
 import { useCallStore } from '../call/callStore';
 import { Avatar } from './Avatar';
 
@@ -15,6 +16,7 @@ const RING_TIMEOUT_MS = 45_000;
 
 export function IncomingCallOverlay() {
   const theme = useTheme();
+  const insets = useLayoutInsets();
   const router = useRouter();
   const incoming = useCallStore((s) => s.incoming);
   const setIncoming = useCallStore((s) => s.setIncoming);
@@ -45,7 +47,7 @@ export function IncomingCallOverlay() {
       from={{ opacity: 0, translateY: -24 }}
       animate={{ opacity: 1, translateY: 0 }}
       transition={{ type: 'spring', damping: 18, stiffness: 240 }}
-      style={[styles.wrap, { backgroundColor: theme.surfaceElevated, borderColor: theme.line }]}
+      style={[styles.wrap, { top: insets.top + 8, backgroundColor: theme.surfaceElevated, borderColor: theme.line }]}
       pointerEvents="box-none"
     >
       <Avatar name={incoming.fromName} size={46} />
