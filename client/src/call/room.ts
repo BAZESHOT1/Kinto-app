@@ -171,7 +171,9 @@ export async function joinCallRoom(opts: JoinOptions): Promise<CallRoomHandle> {
       opts.onPhase('disconnected', reason === DisconnectReason.DUPLICATE_IDENTITY ? 'duplicate' : reason !== undefined ? String(reason) : undefined))
     .on(RoomEvent.AudioPlaybackStatusChanged, () => {
       // Автовоспроизведение в браузере требует жеста пользователя; он у нас был (нажатие «Позвонить»/«Принять»).
-      if (!room.canPlaybackAudio) void room.startAudio().catch(() => undefined);
+      // Только web: на iOS/Android startAudio() сам снова вызывает это событие — бесконечный цикл блокировал JS-поток
+      // (кнопки звонка не нажимались, звонок рвался). Там воспроизведением управляет нативный WebRTC.
+      if (Platform.OS === 'web' && !room.canPlaybackAudio) void room.startAudio().catch(() => undefined);
     });
 
   let wantMuted = false;
