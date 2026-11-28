@@ -2,6 +2,7 @@ import React, { useEffect } from 'react';
 import { Stack, usePathname, useRouter } from 'expo-router';
 import { View, StyleSheet } from 'react-native';
 import { AppShell } from '../../src/components/AppShell';
+import { IncomingCallOverlay } from '../../src/components/IncomingCallOverlay';
 import { useStore } from '../../src/state/useStore';
 import { useTheme } from '../../src/theme/useTheme';
 
@@ -87,6 +88,7 @@ export default function AppLayout() {
         <Stack.Screen name="user/[username]/edit" options={backGesture} />
         <Stack.Screen name="compose" options={{ ...backGesture, presentation: 'modal', animation: 'slide_from_bottom' }} />
       </Stack>
+      <IncomingCallOverlay />
     </AppShell>
   );
 }

@@ -1706,26 +1706,34 @@ export const api = {
       objects: number;
       messages: number;
     }>('/v1/stats'),
-  /* ---- Аудиозвонки (личные и групповые, Hub + kMesh) ---- */
+  /* ---- Аудиозвонки (личные и групповые): LiveKit, сервер звонка выдаёт Hub ---- */
   callStart: (body: {
     chatId?: string;
     members?: string[];
-    kind?: 'direct' | 'group';
     channel?: 'internet' | 'e-kmesh' | 'l-kmesh';
-    quality?: 'good' | 'poor';
-    e2eKey?: string;
+    region?: string;
   }) =>
-    req<{ ok: true; callId: string; roomId: string; e2eKey: string; members: string[] }>(
-      '/v1/calls/start',
-      { method: 'POST', body: JSON.stringify(body) },
-    ),
-  callJoin: (callId: string, sdp: string) =>
-    req<{ ok: true; sdp: string; channel: string; e2eKey: string | null }>(
-      `/v1/calls/${encodeURIComponent(callId)}/join`,
-      { method: 'POST', body: JSON.stringify({ sdp }) },
-    ),
+    req<{
+      ok: true;
+      callId: string;
+      rejoined?: boolean;
+      /** Сервер, на котором идёт звонок: медиа-трафик — напрямую на его домен. */
+      server: { id: string; url: string; domain: string; region: string };
+      roomName: string;
+      token: string;
+      members: string[];
+    }>('/v1/calls/start', { method: 'POST', body: JSON.stringify(body) }),
+  callJoin: (callId: string) =>
+    req<{
+      ok: true;
+      callId: string;
+      server: { id: string; url: string; domain: string; region: string };
+      roomName: string;
+      token: string;
+      channel: string;
+    }>(`/v1/calls/${encodeURIComponent(callId)}/join`, { method: 'POST', body: '{}' }),
   callEnd: (callId: string) =>
-    req<{ ok: true; durationMs: number }>(`/v1/calls/${encodeURIComponent(callId)}/end`, {
+    req<{ ok: true; durationMs?: number; left?: boolean }>(`/v1/calls/${encodeURIComponent(callId)}/end`, {
       method: 'POST',
       body: '{}',
     }),

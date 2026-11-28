@@ -1954,16 +1954,29 @@ function ChatScreen({ forcedId }: { forcedId?: string } = {}) {
         />
 
         {activeCall ? (
-          <View style={{
-            flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
-            paddingHorizontal: 14, paddingVertical: 8, marginHorizontal: 12, marginTop: 4,
-            borderRadius: 12, backgroundColor: theme.accentSoft,
-          }}>
-            <Text style={{ color: theme.accent, fontWeight: '700' }}>
-              Звонок · {String(Math.floor(Math.max(0, Date.now() - activeCall.startedAt) / 60000)).padStart(2, '0')}:{String(Math.floor((Math.max(0, Date.now() - activeCall.startedAt) % 60000) / 1000)).padStart(2, '0')}
-            </Text>
-            <Text style={{ color: theme.accent, fontSize: 11 }}>{activeCall.participants} уч.</Text>
-          </View>
+          <Pressable
+            onPress={() =>
+              router.push({
+                pathname: `/chat/${chatId}/call`,
+                params: { callId: activeCall.id, type: chat?.type ?? '', title: title || 'Звонок' },
+              } as never)
+            }
+            accessibilityRole="button"
+            accessibilityLabel="Присоединиться к звонку"
+            style={{
+              flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+              paddingHorizontal: 14, paddingVertical: 10, marginHorizontal: 12, marginTop: 4,
+              borderRadius: 14, backgroundColor: theme.accentSoft,
+            }}
+          >
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+              <Ionicons name="call" size={16} color={theme.accent} />
+              <Text style={{ color: theme.accent, fontWeight: '700' }}>
+                Идёт звонок · {String(Math.floor(Math.max(0, Date.now() - activeCall.startedAt) / 60000)).padStart(2, '0')}:{String(Math.floor((Math.max(0, Date.now() - activeCall.startedAt) % 60000) / 1000)).padStart(2, '0')}
+              </Text>
+            </View>
+            <Text style={{ color: theme.accent, fontSize: 12.5, fontWeight: '700' }}>{activeCall.participants} уч. · Присоединиться</Text>
+          </Pressable>
         ) : null}
 
 

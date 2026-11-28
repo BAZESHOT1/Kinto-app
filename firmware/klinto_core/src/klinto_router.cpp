@@ -670,9 +670,11 @@ void KlintoRouter::on_packet(const kl_packet_t *pkt, uint8_t iface, int16_t rssi
 
   /* GW_PROBE: шлюз сразу отвечает маяком (не чаще раза в 60 мс), остальные молчат. */
   if (pkt->type == KL_TYPE_GW_PROBE) {
+    stats_.probes_rx++;
     if (is_gateway() && now_ms - last_probe_reply_ms_ >= 60) {
       last_probe_reply_ms_ = now_ms;
-      emit_gateway_beacon_locked(now_ms);
+      stats_.probes_replied++;
+      emit_gateway_beacon_locked(now_ms, true);
     }
     return;
   }
@@ -981,20 +983,7 @@ void KlintoRouter::tick(uint32_t now_ms) {
   maybe_presence(now_ms);
 
   if (is_gateway() && (last_beacon_ms_ == 0 || now_ms - last_beacon_ms_ >= cfg_.gw_beacon_interval_ms)) {
-    last_beacon_ms_ = now_ms;
-    kl_packet_t beacon;
-    kl_packet_init(&beacon, KL_TYPE_GW_BEACON, cfg_.node_id, KL_BROADCAST_ID, KL_BROADCAST_ID, 0);
-    beacon.ttl = cfg_.gw_max_hops;
-    uint8_t payload[11];
-    kl_write_le32(payload, cfg_.node_id);
-    kl_write_le32(payload + 4, cfg_.node_id);
-    payload[8] = 0;
-    payload[9] = capabilities_;
-    /* 1..13: носимый модуль фиксируется ровно на канале шлюза. */
-    payload[10] = cfg_.wifi_channel;
-    kl_packet_set_payload(&beacon, payload, sizeof(payload));
-    kmesh_sign_control(&beacon);
-    if (transmit_on_all(&beacon, now_ms)) stats_.beacons_sent++;
+    emit_gateway_beacon_locked(now_ms, false);
   }
 
   if (mobile_gateway_active() &&
@@ -1036,8 +1025,13 @@ void KlintoRouter::emit_probe(uint32_t now_ms) {
   transmit_on_all(&probe, now_ms);
 }
 
-void KlintoRouter::emit_gateway_beacon_locked(uint32_t now_ms) {
+void KlintoRouter::emit_gateway_beacon_locked(uint32_t now_ms, bool allow_cached) {
   if (!is_gateway()) return;
+  if (allow_cached && cached_beacon_valid_ && now_ms - cached_beacon_ms_ < 5000u) {
+    /* Ответ на пробу: тот же подписанный пакет (получатели обрабатывают маяк до проверки дубликата). */
+    if (transmit_on_all(&cached_beacon_, now_ms)) stats_.beacons_sent++;
+    return;
+  }
   last_beacon_ms_ = now_ms;
   kl_packet_t beacon;
   kl_packet_init(&beacon, KL_TYPE_GW_BEACON, cfg_.node_id, KL_BROADCAST_ID, KL_BROADCAST_ID, 0);
@@ -1047,9 +1041,13 @@ void KlintoRouter::emit_gateway_beacon_locked(uint32_t now_ms) {
   kl_write_le32(payload + 4, cfg_.node_id);
   payload[8] = 0;
   payload[9] = capabilities_;
+  /* 1..13: носимый модуль фиксируется ровно на канале шлюза. */
   payload[10] = cfg_.wifi_channel;
   kl_packet_set_payload(&beacon, payload, sizeof(payload));
   kmesh_sign_control(&beacon);
+  cached_beacon_ = beacon;
+  cached_beacon_valid_ = true;
+  cached_beacon_ms_ = now_ms;
   if (transmit_on_all(&beacon, now_ms)) stats_.beacons_sent++;
 }
 

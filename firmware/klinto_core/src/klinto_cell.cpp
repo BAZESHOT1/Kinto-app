@@ -104,7 +104,8 @@ void KlintoCellManager::start_scan(uint32_t now_ms, uint8_t reason) {
   lock_now_ = false;
   pending_channel_ = 0;
   apply(channel_at(0));
-  scan_deadline_ms_ = now_ms + cell_.scan_dwell_ms;
+  long_first_ = (reason == KL_SCAN_BOOT && pref_channel_ >= 1 && pref_channel_ <= KL_CHANNEL_COUNT);
+  scan_deadline_ms_ = now_ms + (long_first_ ? 1800u : (uint32_t)cell_.scan_dwell_ms);
   arm_probes(now_ms);
 }
 
@@ -230,7 +231,12 @@ void KlintoCellManager::tick(uint32_t now_ms) {
       probe_next_ms_ = now_ms + 70;
       if (host_.send_probe) host_.send_probe(host_.ctx);
     }
+    if (long_first_ && scan_index_ == 0 && probes_left_ == 0 && now_ms >= probe_next_ms_) {
+      probe_next_ms_ = now_ms + 450;
+      if (host_.send_probe) host_.send_probe(host_.ctx);
+    }
     if (now_ms < scan_deadline_ms_) return;
+    long_first_ = false;
     if (scan_index_ + 1 >= KL_CHANNEL_COUNT) {
       finish_scan(now_ms);
       return;

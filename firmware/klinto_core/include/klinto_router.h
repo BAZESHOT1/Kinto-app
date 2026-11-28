@@ -117,6 +117,9 @@ struct kl_router_stats_t {
   uint32_t rrep_sent;
   uint32_t beacons_sent;
   uint32_t presence_sent;
+  /** Пробы GW_PROBE: принято / отвечено маяком (диагностика быстрого поиска соты). */
+  uint32_t probes_rx;
+  uint32_t probes_replied;
   /** Возраст кластерного шлюза в мс (0, если не видели). */
   uint32_t gw_age_ms;
 };
@@ -265,7 +268,12 @@ class KlintoRouter {
   bool is_gateway() const { return cfg_.role == KL_ROLE_GATEWAY; }
   bool gateway_like() const;
   void emit_mobile_beacon(uint32_t now_ms);
-  void emit_gateway_beacon_locked(uint32_t now_ms);
+  /* allow_cached: на GW_PROBE повторяем последний подписанный маяк без новой ECDSA-подписи —
+   * подпись занимает сотни мс, а носимый стоит на канале при скане всего ~160 мс. */
+  void emit_gateway_beacon_locked(uint32_t now_ms, bool allow_cached = false);
+  kl_packet_t cached_beacon_;
+  bool cached_beacon_valid_ = false;
+  uint32_t cached_beacon_ms_ = 0;
   uint32_t last_probe_reply_ms_ = 0;
   void maybe_presence(uint32_t now_ms);
 

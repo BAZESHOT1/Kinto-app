@@ -13,6 +13,7 @@
 #include <stdlib.h>
 
 #include "klinto_codec.h"
+#include "klinto_crypto.h"
 #include "klinto_platform_esp32.h"
 #include "klinto_ota_esp32.h"
 #include "klinto_owner.h"
@@ -321,6 +322,10 @@ bool KlintoNode::begin() {
   /* Фиксируем в NVS роль/распиновку/тип модуля из сборки: эти параметры
    * должны переживать перезагрузку и OTA. */
   kl_config_save_nvs(&cfg_);
+#if KL_KMESH_V1
+  /* Ключ подписи управления: создать/загрузить ДО mesh-задачи (первая ECDSA-операция тяжёлая). */
+  kl_ctrl_signer_init();
+#endif
 
   Serial.printf("[klinto3] role=%u node=%lu iface=%s%s\n", (unsigned)cfg_.role,
                 (unsigned long)cfg_.node_id, cfg_.espnow_enabled ? "espnow" : "",
@@ -1139,11 +1144,12 @@ void KlintoNode::meshTaskEntry(void *arg) {
     if (now - last_stat >= 5000) {
       last_stat = now;
       const kl_router_stats_t *st = self->router_.stats();
-      Serial.printf("[mesh] t=%lus ch=%u cell=%u rx=%lu tx=%lu bcn_rx=%lu bcn_tx=%lu gw_age=%ld heap=%u\n",
+      Serial.printf("[mesh] t=%lus ch=%u cell=%u rx=%lu tx=%lu bcn_rx=%lu bcn_tx=%lu probes=%lu/%lu gw_age=%ld heap=%u\n",
                     (unsigned long)(now / 1000), (unsigned)self->cell_.channel(),
                     (unsigned)self->cell_.state(), (unsigned long)st->rx_packets,
                     (unsigned long)st->tx_packets, (unsigned long)self->router_.beacons_rx(),
-                    (unsigned long)st->beacons_sent, (long)self->router_.gateway_age_ms(now),
+                    (unsigned long)st->beacons_sent, (unsigned long)st->probes_rx,
+                    (unsigned long)st->probes_replied, (long)self->router_.gateway_age_ms(now),
                     (unsigned)ESP.getFreeHeap());
       /* OTA: прогресс загрузки и причина отказа от анонса — без этого раскатку не отладить. */
       {

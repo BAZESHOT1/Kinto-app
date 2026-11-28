@@ -1,197 +1,240 @@
 /**
- * Личные и групповые аудиозвонки Kinto.
- * Канал выбирается автоматически: интернет, при отсутствии — kMesh через носимый модуль.
- * Сигналинг — Hub (/v1/calls), медиа — PCM-микшер Go/Pion с E2E-ключом.
+ * Экран аудиозвонка (личный чат и группа, до 8 участников).
+ *
+ * Медиа — LiveKit (WebRTC/Opus). Сервер звонка выбирает Hub (POST /v1/calls/start) и возвращает его
+ * адрес: голосовой трафик идёт напрямую на домен этого сервера, а не через основной API-домен.
+ * Входящий звонок открывает этот же экран с параметром callId (POST /v1/calls/:id/join).
  */
 import React from 'react';
-import { Pressable, ScrollView, Text, View } from 'react-native';
+import { Platform, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { useLocalSearchParams } from 'expo-router';
+import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useTheme } from '../../../../src/theme/useTheme';
 import { api } from '../../../../src/data/api';
-import { createOffer, type CallChannel, type CallSession } from '../../../../src/call';
-// Без явного .web — Metro сам выберет meshAudio.native.ts на iOS/Android.
-import { startMeshAudio } from '../../../../src/call/meshAudio';
+import { Avatar } from '../../../../src/components/Avatar';
 import { useStore } from '../../../../src/state/useStore';
-import { useModuleConnection } from '../../../../src/modules/ModuleProvider';
+import { useCallStore } from '../../../../src/call/callStore';
+import { supportsSpeakerToggle } from '../../../../src/call/audioSession';
+import {
+  joinCallRoom,
+  type CallParticipantView,
+  type CallPhase,
+  type CallRoomHandle,
+} from '../../../../src/call/room';
 
-type Phase = 'idle' | 'connecting' | 'active' | 'ended';
-
-const LABEL: Record<CallChannel, string> = {
-  internet: 'Интернет · Opus 24–32 kbps',
-  'e-kmesh': 'E-kMesh · ESP-NOW 16–24 kbps',
-  'l-kmesh': 'L-kMesh · LoRa 3–12 kbps',
+const ERRORS: Record<string, string> = {
+  calls_unavailable: 'Звонки временно недоступны',
+  call_servers_unavailable: 'Нет доступных серверов звонков. Попробуйте позже',
+  call_permission_required: 'Нет права создавать звонки в этой группе',
+  calls_not_allowed_in_channels: 'Звонки в каналах недоступны',
+  call_ended: 'Звонок уже завершён',
+  call_full: 'В звонке нет свободных мест',
+  call_forbidden: 'У вас нет доступа к этому звонку',
 };
 
+const fmt = (sec: number) => `${String(Math.floor(sec / 60)).padStart(2, '0')}:${String(sec % 60).padStart(2, '0')}`;
+
 export default function CallScreen() {
-  const params = useLocalSearchParams<{ id?: string; type?: string; autoStart?: string }>();
-  const chatId = String(params.id ?? '');
-  const chatType = String(params.type ?? '');
-  const autoStart = params.autoStart === '1';
+  const params = useLocalSearchParams<{ id?: string; type?: string; callId?: string; title?: string }>();
+  const router = useRouter();
   const theme = useTheme();
   const pushToast = useStore((s) => s.pushToast);
-  const transportOnline = useStore((s) => s.transportOnline);
-  const { info, connected } = useModuleConnection();
-  const [phase, setPhase] = React.useState<Phase>('idle');
+  const chatId = params.id && params.id !== 'x' ? String(params.id) : '';
+  const chatType = String(params.type ?? '');
+  const joinId = typeof params.callId === 'string' ? params.callId : '';
+  const title = typeof params.title === 'string' && params.title ? params.title : 'Аудиозвонок';
+
+  const [phase, setPhase] = React.useState<CallPhase | 'starting' | 'ended'>('starting');
+  const [participants, setParticipants] = React.useState<CallParticipantView[]>([]);
   const [muted, setMuted] = React.useState(false);
-  const [quality, setQuality] = React.useState<'good' | 'poor'>('good');
-  const [history, setHistory] = React.useState<Array<{ id: string; startedAt: number; durationMs: number }>>([]);
-  const sessionRef = React.useRef<CallSession | null>(null);
-  const meshAudioRef = React.useRef<{ stop: () => void } | null>(null);
-  const callIdRef = React.useRef('');
-  const startedRef = React.useRef(0);
+  const [speaker, setSpeaker] = React.useState(false);
   const [seconds, setSeconds] = React.useState(0);
+  const [error, setError] = React.useState('');
+  const roomRef = React.useRef<CallRoomHandle | null>(null);
+  const callIdRef = React.useRef('');
+  const connectedAtRef = React.useRef(0);
+  const closedRef = React.useRef(false);
+  const setActiveCallId = useCallStore((s) => s.setActiveCallId);
+  const activeCallId = useCallStore((s) => s.activeCallId);
 
-  // Канал по умолчанию: интернет; без интернета — kMesh через носимый модуль.
-  const channel: CallChannel = transportOnline
-    ? 'internet'
-    : (Number(info?.hw?.lb ?? 0) > 0 ? 'l-kmesh' : 'e-kmesh');
-  const meshAvailable = transportOnline || (connected && Boolean(info?.gateway));
+  const leave = React.useCallback(
+    async (endForAll: boolean) => {
+      if (closedRef.current) return;
+      closedRef.current = true;
+      setPhase('ended');
+      const id = callIdRef.current;
+      await roomRef.current?.disconnect();
+      roomRef.current = null;
+      setActiveCallId(null);
+      if (id) void api.callEnd(id).catch(() => undefined);
+      void endForAll;
+      if (router.canGoBack()) router.back();
+      else router.replace('/chats' as never);
+    },
+    [router, setActiveCallId],
+  );
+
+  // Запуск: исходящий звонок (start) или вход в чужой (join). Hub возвращает сервер и токен.
+  React.useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      if (chatType === 'channel') {
+        setError('Звонки в каналах недоступны');
+        setPhase('ended');
+        return;
+      }
+      try {
+        const res = joinId ? await api.callJoin(joinId) : await api.callStart({ chatId: chatId || undefined, channel: 'internet' });
+        if (cancelled) return;
+        callIdRef.current = res.callId;
+        setActiveCallId(res.callId);
+        useCallStore.getState().setIncoming(null);
+        const room = await joinCallRoom({
+          url: res.server.url,
+          token: res.token,
+          onParticipants: (list) => !closedRef.current && setParticipants(list),
+          onPhase: (p, reason) => {
+            if (closedRef.current) return;
+            if (p === 'connected' && !connectedAtRef.current) connectedAtRef.current = Date.now();
+            if (p === 'disconnected') {
+              if (reason) console.warn('[call] disconnected', reason);
+              void leave(false);
+              return;
+            }
+            setPhase(p);
+          },
+        });
+        if (cancelled) {
+          await room.disconnect();
+          return;
+        }
+        roomRef.current = room;
+      } catch (e) {
+        if (cancelled) return;
+        const code = e instanceof Error ? e.message : String(e);
+        const known = Object.keys(ERRORS).find((k) => code.includes(k));
+        console.warn('[call] start failed', code);
+        const offline = /network|failed to fetch|timeout|abort|load failed/i.test(code);
+        setError(known ? ERRORS[known] : offline ? 'Нет связи с сервером. Без интернета звонок возможен через E-kMesh при подключённом носимом модуле' : Platform.OS === 'web' && /permission|NotAllowed/i.test(code) ? 'Разрешите доступ к микрофону в браузере' : `Не удалось начать звонок: ${code}`);
+        setPhase('ended');
+        if (callIdRef.current) void api.callEnd(callIdRef.current).catch(() => undefined);
+        setActiveCallId(null);
+      }
+    })();
+    return () => {
+      cancelled = true;
+      if (!closedRef.current) {
+        closedRef.current = true;
+        void roomRef.current?.disconnect();
+        const id = callIdRef.current;
+        setActiveCallId(null);
+        if (id) void api.callEnd(id).catch(() => undefined);
+      }
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Сервер завершил звонок (владелец или пустая комната) — выходим.
+  React.useEffect(() => {
+    if (callIdRef.current && activeCallId === null && !closedRef.current && phase !== 'starting') void leave(false);
+  }, [activeCallId, leave, phase]);
 
   React.useEffect(() => {
-    let mounted = true;
-    void api.callHistory(chatId || undefined, 20).then((r) => {
-      if (mounted) setHistory(r.calls ?? []);
-    }).catch(() => undefined);
-    return () => { mounted = false; };
-  }, [chatId]);
-
-  React.useEffect(() => {
-    if (phase !== 'active') return;
-    const timer = setInterval(() => setSeconds(Math.floor((Date.now() - startedRef.current) / 1000)), 1000);
+    if (phase !== 'connected') return undefined;
+    const timer = setInterval(() => setSeconds(Math.floor((Date.now() - connectedAtRef.current) / 1000)), 1000);
     return () => clearInterval(timer);
   }, [phase]);
 
-  const finish = React.useCallback(async (callId: string) => {
-    sessionRef.current?.stop();
-    sessionRef.current = null;
-    meshAudioRef.current?.stop();
-    meshAudioRef.current = null;
-    setPhase('ended');
-    try {
-      const r = await api.callEnd(callId);
-      setHistory((prev) => [{ id: callId, startedAt: startedRef.current, durationMs: r.durationMs }, ...prev]);
-    } catch { /* offline: длительность сохранится при следующем запуске */ }
-  }, []);
-
-  const start = React.useCallback(async () => {
-    if (chatType === 'channel') {
-      pushToast({ kind: 'error', message: 'Звонки в каналах недоступны' });
-      return;
-    }
-    if (!meshAvailable) {
-      pushToast({ kind: 'error', message: 'Нет интернета и доступа к Hub через носимый модуль' });
-      return;
-    }
-    setPhase('connecting');
-    try {
-      const keyBytes = new Uint8Array(32);
-      if (globalThis.crypto?.getRandomValues) globalThis.crypto.getRandomValues(keyBytes);
-      else for (let i = 0; i < keyBytes.length; i += 1) keyBytes[i] = Math.floor(Math.random() * 256);
-      const e2eKey = btoa(String.fromCharCode(...keyBytes));
-      const started = await api.callStart({
-        chatId: chatId || undefined,
-        kind: chatId ? 'group' : 'direct',
-        channel,
-        e2eKey,
-        quality: channel === 'l-kmesh' ? 'good' : undefined,
-      });
-      if (channel === 'internet') {
-        const result = await createOffer(channel, (sdp) => api.callJoin(started.callId, sdp).then((r) => r.sdp));
-        sessionRef.current = result.session;
-      } else {
-        // E-kMesh: сигналинг уже прошёл через kMesh; аудио идёт Opus-кадрами по kMesh.
-        meshAudioRef.current = await startMeshAudio(started.roomId);
-      }
-      callIdRef.current = started.callId;
-      startedRef.current = Date.now();
-      setPhase('active');
-      const st = sessionRef.current ? await sessionRef.current.stats() : { quality: 'good' as const };
-      setQuality(st.quality);
-      pushToast({ kind: 'info', message: `Звонок начат · ${LABEL[channel]}` });
-    } catch (e) {
-      setPhase('ended');
-      const msg = String(e);
-      pushToast({ kind: 'error', message: msg.includes('permission') ? 'Нет права создавать звонки в этой группе' : `Не удалось начать звонок: ${msg}` });
-    }
-  }, [chatType, meshAvailable, chatId, channel, pushToast]);
-
-  React.useEffect(() => {
-    if (autoStart && phase === 'idle') {
-      const t = setTimeout(() => void start(), 0);
-      return () => clearTimeout(t);
-    }
-    return undefined;
-  }, [autoStart, phase, start]);
-
-  const toggleMute = React.useCallback(() => {
+  const toggleMute = async () => {
     const next = !muted;
-    sessionRef.current?.setMuted(next);
     setMuted(next);
-  }, [muted]);
+    await roomRef.current?.setMuted(next);
+  };
+  const toggleSpeaker = async () => {
+    const next = !speaker;
+    setSpeaker(next);
+    await roomRef.current?.setSpeaker(next);
+  };
 
-  const fmt = (sec: number) => `${String(Math.floor(sec / 60)).padStart(2, '0')}:${String(sec % 60).padStart(2, '0')}`;
-
-  if (chatType === 'channel') {
-    return (
-      <ScrollView style={{ flex: 1, backgroundColor: theme.background }} contentContainerStyle={{ padding: 20 }}>
-        <Text style={{ color: theme.textPrimary, fontSize: 18, fontWeight: '700' }}>Звонки в каналах недоступны</Text>
-        <Text style={{ color: theme.textPrimaryDisabled, fontSize: 13, marginTop: 8 }}>
-          Аудиозвонки работают в личных сообщениях и группах.
-        </Text>
-      </ScrollView>
-    );
-  }
+  const status =
+    phase === 'starting' || phase === 'connecting'
+      ? 'Соединение…'
+      : phase === 'reconnecting'
+        ? 'Переподключение…'
+        : phase === 'connected'
+          ? fmt(seconds)
+          : error || 'Звонок завершён';
 
   return (
-    <ScrollView style={{ flex: 1, backgroundColor: theme.background }} contentContainerStyle={{ padding: 20 }}>
-      <Text style={{ color: theme.textPrimary, fontSize: 20, fontWeight: '700', marginBottom: 6 }}>Аудиозвонок</Text>
-      <Text style={{ color: theme.textPrimaryDisabled, fontSize: 12, marginBottom: 18 }}>
-        {LABEL[channel]} · до 8 участников · E2E-шифрование
-      </Text>
-      {!transportOnline ? (
-        <Text style={{ color: theme.textPrimaryDisabled, fontSize: 12, marginBottom: 12 }}>
-          Интернет недоступен — сигналинг идёт через kMesh и носимый модуль. Медиа доставляется через Hub.
-        </Text>
-      ) : null}
+    <View style={[styles.root, { backgroundColor: theme.background }]}>
+      <View style={styles.header}>
+        <Text style={{ color: theme.textPrimary, fontSize: 22, fontWeight: '800' }} numberOfLines={1}>{title}</Text>
+        <Text style={{ color: phase === 'reconnecting' || error ? theme.warning : theme.accent, fontSize: 16, marginTop: 6 }}>{status}</Text>
+        <Text style={{ color: theme.textSecondary, fontSize: 12, marginTop: 4 }}>Интернет · WebRTC · Opus</Text>
+      </View>
 
-      {phase === 'active' ? (
-        <View style={{ marginTop: 22, alignItems: 'center' }}>
-          <Text style={{ color: theme.accent, fontSize: 34, fontWeight: '800' }}>{fmt(seconds)}</Text>
-          <Text style={{ color: quality === 'good' ? theme.accent : '#F88011', marginTop: 4 }}>
-            {quality === 'good' ? 'Канал хороший' : 'Канал перегружен — снижаем битрейт'}
-          </Text>
-          <View style={{ flexDirection: 'row', gap: 12, marginTop: 20 }}>
-            <Pressable onPress={toggleMute} style={{ padding: 14, borderRadius: 12, backgroundColor: theme.surface }}>
-              <Ionicons name={muted ? 'mic-off' : 'mic'} size={22} color={theme.textPrimary} />
-            </Pressable>
-            <Pressable onPress={() => void finish(callIdRef.current)} style={{ padding: 14, borderRadius: 12, backgroundColor: theme.danger }}>
-              <Ionicons name="call-end" size={22} color="#fff" />
-            </Pressable>
-          </View>
-        </View>
-      ) : (
-        <View style={{ marginTop: 20 }}>
-          {phase === 'connecting' ? (
-            <Text style={{ color: theme.textSecondary }}>Подключение…</Text>
-          ) : null}
-          {phase === 'ended' ? (
-            <Text style={{ color: theme.textSecondary }}>Звонок завершён</Text>
-          ) : null}
-        </View>
-      )}
-
-      {history.length > 0 ? (
-        <View style={{ marginTop: 28 }}>
-          <Text style={{ color: theme.textPrimary, fontWeight: '700', marginBottom: 8 }}>История звонков</Text>
-          {history.slice(0, 12).map((h) => (
-            <View key={h.id} style={{ flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 8, borderBottomWidth: 1, borderBottomColor: theme.line }}>
-              <Text style={{ color: theme.textPrimaryDisabled, fontSize: 12 }}>{new Date(h.startedAt).toLocaleString()}</Text>
-              <Text style={{ color: theme.textPrimary, fontSize: 12 }}>{fmt(Math.round(h.durationMs / 1000))}</Text>
+      <ScrollView contentContainerStyle={styles.grid} showsVerticalScrollIndicator={false}>
+        {participants.map((p) => (
+          <View key={p.id} style={styles.cell}>
+            <View
+              style={[
+                styles.ring,
+                { borderColor: p.speaking ? theme.accent : 'transparent', transform: [{ scale: p.speaking ? 1.04 : 1 }] },
+              ]}
+            >
+              <Avatar name={p.name} size={84} />
+              {p.muted ? (
+                <View style={[styles.mutedBadge, { backgroundColor: theme.surfaceElevated }]}>
+                  <Ionicons name="mic-off" size={14} color={theme.textSecondary} />
+                </View>
+              ) : null}
             </View>
-          ))}
-        </View>
-      ) : null}
-    </ScrollView>
+            <Text style={{ color: theme.textPrimary, marginTop: 8, fontSize: 14 }} numberOfLines={1}>
+              {p.local ? 'Вы' : p.name}
+            </Text>
+          </View>
+        ))}
+      </ScrollView>
+
+      <View style={styles.controls}>
+        <Pressable
+          onPress={() => void toggleMute()}
+          accessibilityRole="button"
+          accessibilityLabel={muted ? 'Включить микрофон' : 'Выключить микрофон'}
+          style={[styles.btn, { backgroundColor: muted ? theme.textPrimary : theme.surfaceElevated }]}
+        >
+          <Ionicons name={muted ? 'mic-off' : 'mic'} size={26} color={muted ? theme.background : theme.textPrimary} />
+        </Pressable>
+        {supportsSpeakerToggle ? (
+          <Pressable
+            onPress={() => void toggleSpeaker()}
+            accessibilityRole="button"
+            accessibilityLabel="Громкая связь"
+            style={[styles.btn, { backgroundColor: speaker ? theme.textPrimary : theme.surfaceElevated }]}
+          >
+            <Ionicons name="volume-high" size={26} color={speaker ? theme.background : theme.textPrimary} />
+          </Pressable>
+        ) : null}
+        <Pressable
+          onPress={() => void leave(true)}
+          accessibilityRole="button"
+          accessibilityLabel="Завершить звонок"
+          style={[styles.btn, { backgroundColor: theme.danger }]}
+        >
+          <Ionicons name="call" size={26} color="#FFFFFF" style={{ transform: [{ rotate: '135deg' }] }} />
+        </Pressable>
+      </View>
+    </View>
   );
 }
+
+const styles = StyleSheet.create({
+  root: { flex: 1, paddingTop: 24, paddingBottom: 28 },
+  header: { alignItems: 'center', paddingHorizontal: 24, paddingTop: 12 },
+  grid: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'center', padding: 24, gap: 18 },
+  cell: { width: 112, alignItems: 'center' },
+  ring: { borderWidth: 3, borderRadius: 999, padding: 3 },
+  mutedBadge: { position: 'absolute', right: 0, bottom: 0, width: 26, height: 26, borderRadius: 13, alignItems: 'center', justifyContent: 'center' },
+  controls: { flexDirection: 'row', justifyContent: 'center', gap: 22, paddingHorizontal: 24 },
+  btn: { width: 66, height: 66, borderRadius: 33, alignItems: 'center', justifyContent: 'center' },
+});

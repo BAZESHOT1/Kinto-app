@@ -112,6 +112,8 @@ class KlintoCellManager {
   uint8_t best_hops_;
   /** Скан: в каждом канале шлюзу шлём пробы, а не ждём маяк раз в 5 с. */
   uint32_t probe_next_ms_ = 0;
+  /* Загрузка: на последнем рабочем канале стоим дольше обычного dwell и повторяем пробы. */
+  bool long_first_ = false;
   uint8_t probes_left_ = 0;
   /** on_beacon вызывается под блокировкой роутера: host-колбэки только из tick(). */
   bool lock_now_ = false;
