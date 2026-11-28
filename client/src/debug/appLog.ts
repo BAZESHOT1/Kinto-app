@@ -49,6 +49,15 @@ function push(level: LogLevel, args: unknown[]): void {
   entries.push({ at: Date.now(), level, text });
   if (entries.length > MAX_ENTRIES) entries = entries.slice(entries.length - MAX_ENTRIES);
   notify();
+  // Шаги звонка пишем на диск сразу: при нативном вылете последняя строка покажет, где он случился.
+  if (text.startsWith('[call]')) {
+    try {
+      void Promise.resolve(kv.set(PERSIST_KEY, JSON.stringify(entries.slice(-PERSIST_ENTRIES)))).catch(() => undefined);
+    } catch {
+      /* ignore */
+    }
+    return;
+  }
   schedulePersist();
 }
 

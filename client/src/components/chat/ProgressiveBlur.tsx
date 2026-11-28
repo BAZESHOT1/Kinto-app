@@ -10,12 +10,13 @@ import React from 'react';
 import { Platform, StyleSheet, View } from 'react-native';
 import { BlurView } from 'expo-blur';
 import { useTheme } from '../../theme/useTheme';
+import { NATIVE_BLUR_OK } from '../blurSupport';
 
 const BLUR_STEPS_PX = [1, 2, 3.5, 5, 8, 12];
 
 export function ProgressiveBlur({ edge, height }: { edge: 'top' | 'bottom'; height: number }) {
   const theme = useTheme();
-  if (height <= 0) return null;
+  if (height <= 0 || !NATIVE_BLUR_OK) return null;
   const n = BLUR_STEPS_PX.length;
   // «к краю» = вверх для верхнего блока, вниз для нижнего.
   const toInner = edge === 'top' ? 'to bottom' : 'to top';

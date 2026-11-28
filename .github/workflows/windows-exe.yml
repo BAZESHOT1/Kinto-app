@@ -45,6 +45,12 @@ jobs:
         run: |
           rm -rf web
           cp -r ../dist web
+          # electron-builder выбрасывает любые каталоги node_modules из пакета — вместе со шрифтами иконок
+          # (assets/node_modules/@expo/vector-icons/...). Переименовываем каталог и правим ссылки в бандле.
+          if [ -d web/assets/node_modules ]; then
+            mv web/assets/node_modules web/assets/_nm
+            grep -rl "assets/node_modules" web --include=*.js --include=*.html --include=*.css --include=*.json | xargs -r sed -i 's#assets/node_modules#assets/_nm#g'
+          fi
           npm install --no-audit --no-fund
           npm run dist
 

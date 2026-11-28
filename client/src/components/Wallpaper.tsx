@@ -62,7 +62,8 @@ export function Wallpaper({
   void bleed;
   void insets;
   void wideShell;
-  const bleedStyle = null;
+  // Web: фон выступает выше верхнего края (обрезается окном), чтобы сверху не оставалось зазора.
+  const bleedStyle = Platform.OS === 'web' ? ({ top: -160 } as const) : null;
   const theme = useTheme();
   const proc = parseProcedural(image);
   const loaded = useEncryptedImage(proc ? null : image);

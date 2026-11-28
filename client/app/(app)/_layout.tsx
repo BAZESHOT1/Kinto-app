@@ -1,7 +1,7 @@
 import React, { useEffect } from 'react';
 import { Stack, usePathname, useRouter } from 'expo-router';
-import { View, StyleSheet } from 'react-native';
-import { AppShell } from '../../src/components/AppShell';
+import { Platform, View, StyleSheet } from 'react-native';
+import { AppShell, useShellMetrics } from '../../src/components/AppShell';
 import { IncomingCallOverlay } from '../../src/components/IncomingCallOverlay';
 import { useStore } from '../../src/state/useStore';
 import { useTheme } from '../../src/theme/useTheme';
@@ -42,10 +42,31 @@ export default function AppLayout() {
 
   return (
     <AppShell>
+      <AppStack />
+      <IncomingCallOverlay />
+    </AppShell>
+  );
+}
+
+/**
+ * Стек экранов. На iOS/Android native-экраны (react-native-screens) обрезают содержимое по своим границам, поэтому
+ * full-bleed фон (отрицательные margin на экранах чата и профиля) упирался в отступы оболочки и давал рамки.
+ * Здесь сам стек растягивается на весь экран (отрицательные margin = отступы оболочки), а те же отступы
+ * возвращаются экранам через contentStyle: раскладка содержимого не меняется, зато фон может доходить до краёв.
+ */
+function AppStack() {
+  const theme = useTheme();
+  const shell = useShellMetrics();
+  const native = Platform.OS !== 'web';
+  const pad = native ? { paddingTop: shell.paddingTop, paddingLeft: shell.paddingLeft, paddingRight: shell.paddingRight } : null;
+  const content = { backgroundColor: theme.background, ...pad };
+  // Модальные экраны показываются поверх всего окна и своих отступов оболочки не имели.
+  const modalContent = { backgroundColor: theme.background };
+  const stack = (
       <Stack
         screenOptions={{
           headerShown: false,
-          contentStyle: { backgroundColor: theme.background },
+          contentStyle: content,
           animation: 'slide_from_right',
           animationDuration: 240,
           // Обычный свайп от левого края. Полноэкранный жест и кастомная
@@ -82,13 +103,17 @@ export default function AppLayout() {
         <Stack.Screen name="language" options={backGesture} />
         <Stack.Screen name="admin" options={backGesture} />
         <Stack.Screen name="chat/[id]" options={backGesture} />
-        <Stack.Screen name="chat/[id]/call" options={{ ...backGesture, presentation: 'modal', animation: 'slide_from_bottom' }} />
+        <Stack.Screen name="chat/[id]/call" options={{ ...backGesture, presentation: 'modal', animation: 'slide_from_bottom', contentStyle: modalContent }} />
         <Stack.Screen name="chat/[id]/info" options={backGesture} />
         <Stack.Screen name="user/[username]" options={backGesture} />
         <Stack.Screen name="user/[username]/edit" options={backGesture} />
-        <Stack.Screen name="compose" options={{ ...backGesture, presentation: 'modal', animation: 'slide_from_bottom' }} />
+        <Stack.Screen name="compose" options={{ ...backGesture, presentation: 'modal', animation: 'slide_from_bottom', contentStyle: modalContent }} />
       </Stack>
-      <IncomingCallOverlay />
-    </AppShell>
+  );
+  if (!native) return stack;
+  return (
+    <View style={{ flex: 1, marginTop: -shell.paddingTop, marginLeft: -shell.paddingLeft, marginRight: -shell.paddingRight }}>
+      {stack}
+    </View>
   );
 }

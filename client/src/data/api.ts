@@ -1719,6 +1719,7 @@ export const api = {
     members?: string[];
     channel?: 'internet' | 'e-kmesh' | 'l-kmesh';
     region?: string;
+    serverId?: string;
   }) =>
     req<{
       ok: true;
@@ -1730,6 +1731,8 @@ export const api = {
       token: string;
       members: string[];
     }>('/v1/calls/start', { method: 'POST', body: JSON.stringify(body) }),
+  callServers: () =>
+    req<{ ok: true; servers: { id: string; domain: string; region: string; enabled: boolean; healthy: boolean }[] }>('/v1/calls/servers'),
   callJoin: (callId: string) =>
     req<{
       ok: true;

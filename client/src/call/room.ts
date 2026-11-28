@@ -47,15 +47,19 @@ const view = (p: Participant, local: boolean): CallParticipantView => ({
 /** Подключиться к комнате: адрес сервера и токен выдаёт Hub (POST /v1/calls/start или /join). */
 export async function joinCallRoom(opts: JoinOptions): Promise<CallRoomHandle> {
   // livekit-client грузится только в момент звонка (на телефонах — после регистрации WebRTC-глобалей).
+  console.log('[call] step globals');
   ensureCallGlobals();
   // eslint-disable-next-line @typescript-eslint/no-require-imports
   const { AudioPresets, ConnectionState, Room, RoomEvent, Track } = require('livekit-client') as typeof import('livekit-client');
+  console.log('[call] step audio-session');
   await startCallAudioSession();
   const room = new Room({
     adaptiveStream: false,
     dynacast: true,
     stopLocalTrackOnUnpublish: true,
-    audioCaptureDefaults: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
+    // Эквивалент getUserMedia({ audio: { noiseSuppression: true } }): web/Windows — браузерный движок,
+    // iOS/Android — react-native-webrtc (noiseSuppression) поверх AVAudioSession voiceChat / NoiseSuppressor.
+    audioCaptureDefaults: { echoCancellation: true, noiseSuppression: true, autoGainControl: true, voiceIsolation: true },
     publishDefaults: { audioPreset: AudioPresets.speech, dtx: true, red: true },
   });
 
@@ -103,8 +107,11 @@ export async function joinCallRoom(opts: JoinOptions): Promise<CallRoomHandle> {
 
   opts.onPhase('connecting');
   try {
+    console.log('[call] step connect', opts.url);
     await room.connect(opts.url, opts.token, { autoSubscribe: true });
+    console.log('[call] step microphone');
     await room.localParticipant.setMicrophoneEnabled(true);
+    console.log('[call] step ready');
     if (Platform.OS === 'web') {
       await room.startAudio().catch(() => undefined);
       // Локальное шумоподавление RNNoise (web и Windows). Ошибка не должна ломать звонок.

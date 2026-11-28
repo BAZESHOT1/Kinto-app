@@ -13,6 +13,7 @@ import React from 'react';
 import { Platform, StyleSheet, View, type ViewProps } from 'react-native';
 import { BlurView } from 'expo-blur';
 import { useTheme } from '../theme/useTheme';
+import { NATIVE_BLUR_OK } from './blurSupport';
 
 export const GLASS_BORDER = 'rgba(255, 255, 255, 0.10)';
 /** Заливка кнопок шапки: 12% белого. */
@@ -99,7 +100,7 @@ export function Glass({
         style,
       ]}
     >
-      {!web ? (
+      {!web && NATIVE_BLUR_OK ? (
         <BlurView
           intensity={intensity}
           tint={effTint}
@@ -107,6 +108,10 @@ export function Glass({
           style={StyleSheet.absoluteFill}
           pointerEvents="none"
         />
+      ) : null}
+      {/* Android < 12: без размытия — плотная подложка под заливкой (см. blurSupport). */}
+      {!web && !NATIVE_BLUR_OK ? (
+        <View pointerEvents="none" style={[StyleSheet.absoluteFill, { backgroundColor: light ? 'rgba(244,246,250,0.86)' : 'rgba(22,24,30,0.82)' }]} />
       ) : null}
       {/* Заливка поверх стекла: задаёт точный процент белого. */}
       <View pointerEvents="none" style={[StyleSheet.absoluteFill, { backgroundColor: effFill }]} />

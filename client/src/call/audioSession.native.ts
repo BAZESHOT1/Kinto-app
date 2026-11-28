@@ -13,6 +13,18 @@ export const supportsSpeakerToggle = true;
 
 export async function startCallAudioSession(): Promise<void> {
   const { AndroidAudioTypePresets, AudioSession } = lk();
+  // iOS: категория playAndRecord и режим voiceChat — системное шумо-/эхоподавление голосовой связи.
+  // Android: AndroidAudioTypePresets.communication (MODE_IN_COMMUNICATION) включает аппаратные NS/AEC, где они есть.
+  if (Platform.OS === 'ios') {
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const mod = require('@livekit/react-native') as any;
+      const cfg = mod.getDefaultAppleAudioConfigurationForMode?.('localAndRemote', true);
+      if (cfg) await mod.AudioSession.setAppleAudioConfiguration({ ...cfg, audioMode: 'voiceChat' });
+    } catch {
+      /* не критично: LiveKit выставит конфигурацию сам */
+    }
+  }
   await AudioSession.configureAudio({
     android: {
       preferredOutputList: ['speaker', 'earpiece', 'bluetooth', 'headset'],

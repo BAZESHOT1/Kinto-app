@@ -32,6 +32,30 @@ const ERRORS: Record<string, string> = {
   call_not_allowed: 'Пользователю нельзя позвонить, лучше напишите сообщение',
 };
 
+/** Самый быстрый из доступных именно этому устройству серверов звонков (часть сетей режет часть адресов). */
+async function pickReachableServer(): Promise<string | undefined> {
+  try {
+    const { servers } = await api.callServers();
+    const live = servers.filter((x) => x.enabled && x.healthy);
+    if (live.length < 2) return undefined;
+    const probe = (x: { id: string; domain: string }) =>
+      new Promise<string | null>((resolve) => {
+        const ctl = new AbortController();
+        const timer = setTimeout(() => { ctl.abort(); resolve(null); }, 3500);
+        fetch(`https://${x.domain}/`, { mode: 'no-cors', signal: ctl.signal, cache: 'no-store' })
+          .then(() => { clearTimeout(timer); resolve(x.id); })
+          .catch(() => { clearTimeout(timer); resolve(null); });
+      });
+    // Первый ответивший сервер выигрывает.
+    return await new Promise<string | undefined>((resolve) => {
+      let left = live.length;
+      live.forEach((x) => void probe(x).then((id) => { if (id) resolve(id); else if (--left === 0) resolve(undefined); }));
+    });
+  } catch {
+    return undefined;
+  }
+}
+
 const fmt = (sec: number) => `${String(Math.floor(sec / 60)).padStart(2, '0')}:${String(sec % 60).padStart(2, '0')}`;
 
 export function CallHost() {
@@ -114,7 +138,7 @@ function ActiveCall({ session }: { session: CallSession }) {
         return;
       }
       try {
-        const res = joinId ? await api.callJoin(joinId) : await api.callStart({ chatId: chatId || undefined, channel: 'internet' });
+        const res = joinId ? await api.callJoin(joinId) : await api.callStart({ chatId: chatId || undefined, channel: 'internet', serverId: await pickReachableServer() });
         if (cancelled) return;
         callIdRef.current = res.callId;
         setActiveCallId(res.callId);

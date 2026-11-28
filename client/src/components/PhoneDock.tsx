@@ -30,6 +30,16 @@ const TILE_GAP = spacing.xxs;
 const DOCK_WIDTH = 200;
 const DOCK_WIDTH_COMPACT = 176;
 
+/** Установленное PWA (Домой / standalone): там нижний зазор под доком на 4 px меньше. */
+function isStandalonePwa(): boolean {
+  if (Platform.OS !== 'web' || typeof window === 'undefined') return false;
+  try {
+    return (navigator as unknown as { standalone?: boolean }).standalone === true || window.matchMedia?.('(display-mode: standalone)').matches === true;
+  } catch {
+    return false;
+  }
+}
+
 export function PhoneDock() {
   const theme = useTheme();
   const { width: screenWidth } = useWindowDimensions();
@@ -126,7 +136,7 @@ export function PhoneDock() {
   const enterTranslateY = enter.interpolate({ inputRange: [0, 1], outputRange: [16, 0] });
   // Единый источник: инсет снизу + зазор из layout-токенов.
   // На смартфонах (нативные сборки) док на 4 px ниже; web/PWA без изменений.
-  const dockBottom = insets.bottom + DOCK_BOTTOM_GAP - (Platform.OS === 'web' ? 0 : 4);
+  const dockBottom = insets.bottom + DOCK_BOTTOM_GAP - (Platform.OS === 'web' ? (isStandalonePwa() ? 4 : 0) : 4);
 
   const userMatch = /^\/user\/([^/]+)(?:\/edit)?/.exec(pathname);
   const viewingOtherProfile =

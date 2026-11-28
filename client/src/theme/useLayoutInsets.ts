@@ -43,6 +43,14 @@ function iosPwaTopFallback(): number {
   return gap >= 40 && gap <= 90 ? Math.round(gap) : 0;
 }
 
+function iosPwaDoubleCount(envTop: number): boolean {
+  if (envTop <= 0 || typeof window === 'undefined' || typeof navigator === 'undefined') return false;
+  const standalone = (navigator as unknown as { standalone?: boolean }).standalone === true;
+  if (!standalone || !/iPhone|iPad/.test(navigator.userAgent)) return false;
+  const gap = Math.max(window.screen?.height ?? 0, window.screen?.width ?? 0) - window.innerHeight;
+  return gap >= envTop - 8;
+}
+
 function useWebInsets(): LayoutInsets {
   const [v, setV] = React.useState<LayoutInsets>(() => probeWebInsets() ?? ZERO);
   React.useEffect(() => {
@@ -70,9 +78,11 @@ export function useLayoutInsets(): LayoutInsets {
   const web = useWebInsets();
   if (Platform.OS !== 'web') return native;
   // Берём большее из двух источников: любой из них может оказаться нулевым.
+  // iOS PWA со статус-баром black: окно уже начинается под ним, а env(top) может всё равно быть > 0 — тогда это двойной учёт.
+  const dbl = iosPwaDoubleCount(web.top);
   const fallbackTop = 0; // со статус-баром style=black окно начинается под ним: компенсация не нужна
   return {
-    top: Math.max(web.top, native.top, fallbackTop),
+    top: Math.max(dbl ? 0 : web.top, dbl ? 0 : native.top, fallbackTop),
     right: Math.max(web.right, native.right),
     bottom: Math.max(web.bottom, native.bottom),
     left: Math.max(web.left, native.left),

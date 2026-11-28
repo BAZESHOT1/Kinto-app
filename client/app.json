@@ -2,7 +2,7 @@
   "expo": {
     "name": "Kinto",
     "slug": "klinto",
-    "version": "1.10.117",
+    "version": "1.10.118",
     "orientation": "portrait",
     "scheme": "klinto",
     "userInterfaceStyle": "dark",
@@ -53,6 +53,7 @@
       "react-native-background-fetch",
       "./plugins/withNotifeeForegroundService",
       "@livekit/react-native-expo-plugin",
+      ["react-native-audio-api", { "iosMicrophonePermission": "Kinto использует микрофон для голоса через kMesh." }],
       [
         "react-native-ble-plx",
         {
@@ -81,7 +82,7 @@
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.pink-project.kintoapp",
-      "buildNumber": "11117",
+      "buildNumber": "11118",
       "googleServicesFile": "./GoogleService-Info.plist",
       "entitlements": {
         "aps-environment": "production"
@@ -103,7 +104,7 @@
     },
     "android": {
       "package": "com.pink_project.kintoapp",
-      "versionCode": 11117,
+      "versionCode": 11118,
       "softwareKeyboardLayoutMode": "resize",
       "googleServicesFile": "./google-services.json",
       "adaptiveIcon": {
